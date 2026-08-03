@@ -1,8 +1,18 @@
 from fastapi import FastAPI, UploadFile, File
 from typing import List
 from schemas import Subject, SubjectCreate, LectureSummaryResponse, QueryRequest, QueryResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Lecture Agent API")
+
+# Flutter 브라우저(Web) 통신 허용을 위한 CORS 설정
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 def health_check():
