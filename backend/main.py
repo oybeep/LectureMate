@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # RAG 관련 모듈 불러오기
 from src.rag.vector_store import VectorDBManager
 from src.rag.search import LectureSearchService
+from src.ai.recommendation import ReviewRecommendationService
 
 app = FastAPI(title="Lecture Agent API")
 
@@ -75,4 +76,22 @@ def search_lecture(query: QueryRequest):
     return {
         "answer": matched_content,
         "timestamp": matched_timestamp
+    }
+
+@app.get("/api/ai/review-recommendations")
+def get_review_recommendations():
+    """
+    홈 화면 및 AI 복습 탭에 전달할 맞춤형 복습 추천 카드 데이터 반환
+    """
+    # 임시 사용자 학습 데이터 (추후 DB 연동)
+    mock_user_history = [
+        {"subject": "AI_Engineering", "lecture_title": "Lesson_03_Gradient_Descent", "days_ago": 8, "review_count": 1},
+        {"subject": "AI_Engineering", "lecture_title": "Lesson_04_Optimization", "days_ago": 2, "review_count": 3},
+        {"subject": "Data_Science", "lecture_title": "Lesson_01_Data_Preprocessing", "days_ago": 5, "review_count": 0},
+    ]
+
+    results = recommend_service.get_review_recommendations(mock_user_history)
+    return {
+        "status": "success",
+        "recommendations": results
     }
