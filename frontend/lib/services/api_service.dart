@@ -15,7 +15,7 @@ class ApiService {
     ),
   );
 
-  // 1. 서버 헬스 체크
+  // 1. 서버 헬스 체크 (/health)
   Future<bool> checkHealth() async {
     try {
       final response = await _dio.get('/health');
@@ -26,7 +26,7 @@ class ApiService {
     }
   }
 
-  // 2. 수강 과목 목록 가져오기
+  // 2. 수강 과목 목록 가져오기 (/subjects)
   Future<List<dynamic>> getSubjects() async {
     try {
       final response = await _dio.get('/subjects');
@@ -40,21 +40,33 @@ class ApiService {
     }
   }
 
-  // 3. 음성 파일 업로드 및 전체 분석 (End-to-End STT + 요약 + 퀴즈)
+  // 3. 음성 파일 업로드 및 전체 분석 요청 (/lectures/upload)
+  // End-to-End: STT -> 요약 -> 퀴즈 생성 한 번에 처리
   Future<Map<String, dynamic>> uploadAudioAndAnalyze({
     required String filePath,
     required int subjectId,
+    List<int>? bytes, // 웹 녹음 시 바이너리 데이터 수신용 추가
   }) async {
     try {
-      final file = File(filePath);
-      final fileName = filePath.split('/').last;
+      final fileName = filePath.split('/').last.isEmpty ? 'recorded_audio.wav' : filePath.split('/').last;
+
+      MultipartFile multipartFile;
+
+      if (kIsWeb && bytes != null) {
+        // 웹(Chrome) 환경일 경우 바이트로 생성
+        multipartFile = MultipartFile.fromBytes(bytes, filename: fileName);
+      } else {
+        // 모바일/데스크톱 환경일 경우 파일 경로 사용
+        final file = File(filePath);
+        multipartFile = await MultipartFile.fromFile(
+          file.path,
+          filename: fileName,
+        );
+      }
 
       final formData = FormData.fromMap({
         'subject_id': subjectId.toString(),
-        'file': await MultipartFile.fromFile(
-          file.path,
-          filename: fileName,
-        ),
+        'file': multipartFile,
       });
 
       final response = await _dio.post(
@@ -72,7 +84,7 @@ class ApiService {
     }
   }
 
-  // 4. 과목별 생성된 강의 AI 노트 가져오기
+  // 4. 과목별 생성된 강의 AI 노트 목록 가져오기 (/subjects/{id}/lectures)
   Future<List<dynamic>> getLecturesBySubject(int subjectId) async {
     try {
       final response = await _dio.get('/subjects/$subjectId/lectures');
