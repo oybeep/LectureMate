@@ -50,11 +50,14 @@ class _MainScreenState extends State<MainScreen> {
             selectedIcon: Icon(Icons.calendar_today),
             label: '시간표',
           ),
+          
+          // ✨ 세 번째 탭 수정: 녹음 -> AI 질의응답
           NavigationDestination(
-            icon: Icon(Icons.mic_none_outlined),
-            selectedIcon: Icon(Icons.mic),
-            label: '녹음',
+            icon: Icon(Icons.psychology_outlined), // 선택 전: 브레인 아이콘 테두리
+            selectedIcon: Icon(Icons.psychology),   // 선택 후: 브레인 아이콘 채움
+            label: 'AI 질의응답',
           ),
+          
           NavigationDestination(
             icon: Icon(Icons.auto_awesome_outlined),
             selectedIcon: Icon(Icons.auto_awesome),
