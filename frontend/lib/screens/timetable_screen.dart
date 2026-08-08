@@ -1,7 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'package:frontend/subject_provider.dart';
 
 class TimetableScreen extends StatefulWidget {
   const TimetableScreen({super.key});
@@ -11,8 +10,6 @@ class TimetableScreen extends StatefulWidget {
 }
 
 class _TimetableScreenState extends State<TimetableScreen> {
-  final String baseUrl = 'http://127.0.0.1:8000'; // 백엔드 서버 주소
-
   final List<String> _days = ['월', '화', '수', '목', '금'];
   final List<int> _hours = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 
@@ -24,167 +21,18 @@ class _TimetableScreenState extends State<TimetableScreen> {
     Colors.blue.shade100,
     Colors.pink.shade100,
     Colors.amber.shade100,
+    Colors.lightGreen.shade100,
+    Colors.cyan.shade100,
   ];
-
-  Map<String, List<Map<String, String>>> _timetable = {
-    '월': [],
-    '화': [],
-    '수': [],
-    '목': [],
-    '금': [],
-  };
 
   @override
   void initState() {
     super.initState();
-    _fetchSubjectsFromServer(); // 🌐 앱/웹 실행 시 서버에서 먼저 과목 가져오기
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SubjectProvider>().fetchSubjects();
+    });
   }
 
-  // 1. 백엔드 서버에서 과목 목록 불러오기 (우선 적용)
-  Future<void> _fetchSubjectsFromServer() async {
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/subjects/'));
-      if (response.statusCode == 200) {
-        final List<dynamic> subjects = jsonDecode(utf8.decode(response.bodyBytes));
-        
-        // 시간표 초기화
-        final Map<String, List<Map<String, String>>> newTimetable = {
-          '월': [], '화': [], '수': [], '목': [], '금': [],
-        };
-
-        for (var sub in subjects) {
-          final String title = sub['title'] ?? sub['name'] ?? '미정';
-          final String instructor = sub['professor'] ?? sub['instructor'] ?? '미지정';
-          final String timeSlot = sub['time_slot'] ?? sub['time'] ?? '수 09:00~10:30';
-
-          // time_slot 문자열 파싱 (예: "수 09:00~10:30" 또는 "수 09:00 ~ 10:30")
-          String day = '월';
-          String startTime = '09:00';
-          String endTime = '10:30';
-
-          for (String d in _days) {
-            if (timeSlot.contains(d)) {
-              day = d;
-              break;
-            }
-          }
-
-          final timeParts = timeSlot.replaceAll(day, '').trim().split('~');
-          if (timeParts.length >= 2) {
-            startTime = timeParts[0].trim();
-            endTime = timeParts[1].trim();
-          }
-
-          newTimetable[day]?.add({
-            'title': title,
-            'instructor': instructor,
-            'start_time': startTime,
-            'end_time': endTime,
-            'time': '$startTime ~ $endTime',
-          });
-        }
-
-        setState(() {
-          _timetable = newTimetable;
-        });
-        _saveTimetable(); // 로컬 저장소와도 동기화
-      } else {
-        _loadTimetable(); // 서버 실패 시 로컬 로드
-      }
-    } catch (e) {
-      debugPrint('서버 과목 로드 실패, 로컬 데이터 로드: $e');
-      _loadTimetable();
-    }
-  }
-
-  // 2. SharedPreferences 로드
-  Future<void> _loadTimetable() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? savedData = prefs.getString('user_timetable');
-
-    if (savedData != null) {
-      try {
-        final Map<String, dynamic> decoded = jsonDecode(savedData);
-        setState(() {
-          _timetable = decoded.map((key, value) {
-            final list = (value as List)
-                .map((item) => Map<String, String>.from(item))
-                .toList();
-            return MapEntry(key, list);
-          });
-        });
-      } catch (e) {
-        debugPrint('시간표 로딩 에러: $e');
-      }
-    }
-  }
-
-  // 3. SharedPreferences 저장
-  Future<void> _saveTimetable() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_timetable', jsonEncode(_timetable));
-  }
-
-  // 4. 백엔드 서버 동기화 헬퍼 메서드
-  Future<void> _syncSubjectToBackendServer(String title, String professor, String timeSlot) async {
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/subjects/'));
-      if (response.statusCode == 200) {
-        final List<dynamic> subjects = jsonDecode(utf8.decode(response.bodyBytes));
-        int? targetId;
-        for (var sub in subjects) {
-          if ((sub['title'] ?? sub['name']) == title) {
-            targetId = int.tryParse(sub['id'].toString());
-            break;
-          }
-        }
-
-        if (targetId != null) {
-          await http.put(
-            Uri.parse('$baseUrl/subjects/$targetId'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'title': title,
-              'professor': professor,
-              'time_slot': timeSlot,
-            }),
-          );
-        } else {
-          await http.post(
-            Uri.parse('$baseUrl/subjects/'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'title': title,
-              'professor': professor,
-              'time_slot': timeSlot,
-            }),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('백엔드 과목 동기화 에러: $e');
-    }
-  }
-
-  Future<void> _deleteSubjectFromBackendServer(String title) async {
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/subjects/'));
-      if (response.statusCode == 200) {
-        final List<dynamic> subjects = jsonDecode(utf8.decode(response.bodyBytes));
-        for (var sub in subjects) {
-          if ((sub['title'] ?? sub['name']) == title) {
-            final int targetId = int.parse(sub['id'].toString());
-            await http.delete(Uri.parse('$baseUrl/subjects/$targetId'));
-            break;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('백엔드 과목 삭제 에러: $e');
-    }
-  }
-
-  // 5. 시간 변환 및 포맷팅 헬퍼
   int _timeToMinutes(String timeStr) {
     try {
       final parts = timeStr.trim().split(':');
@@ -212,14 +60,15 @@ class _TimetableScreenState extends State<TimetableScreen> {
     return '$hour:$minute';
   }
 
-// 6. 과목 추가/수정 다이얼로그
   void _showAddOrEditClassDialog({
     required String defaultDay,
     Map<String, String>? existingItem,
     int? editIndex,
   }) {
     final titleController = TextEditingController(text: existingItem?['title'] ?? '');
-    final instructorController = TextEditingController(text: existingItem?['instructor'] ?? '');
+    final instructorController = TextEditingController(
+      text: existingItem?['instructor'] ?? existingItem?['professor'] ?? '',
+    );
 
     String selectedDay = defaultDay;
     TimeOfDay startTime = _parseTimeOfDay(existingItem?['start_time'] ?? '09:00');
@@ -234,13 +83,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
               contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              title: Row(
-                children: [
-                  Text(
-                    existingItem == null ? '✏️ 수강 과목 추가' : '✏️ 수강 과목 수정',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                  ),
-                ],
+              title: Text(
+                existingItem == null ? '✏️ 수강 과목 추가' : '✏️ 수강 과목 수정',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               ),
               content: SingleChildScrollView(
                 child: Column(
@@ -275,8 +120,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                           return Padding(
                             padding: const EdgeInsets.only(right: 4.0),
                             child: ChoiceChip(
-                              showCheckmark: false, // 👈 체크 아이콘 제거
-                              visualDensity: VisualDensity.compact, // 👈 여백 축소
+                              showCheckmark: false,
+                              visualDensity: VisualDensity.compact,
                               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               label: Text(day, style: const TextStyle(fontSize: 13)),
@@ -346,16 +191,19 @@ class _TimetableScreenState extends State<TimetableScreen> {
               ),
               actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               actions: [
-                if (existingItem != null && editIndex != null)
+                if (existingItem != null)
                   TextButton(
                     onPressed: () async {
-                      final String oldTitle = existingItem['title'] ?? '';
-                      setState(() {
-                        _timetable[defaultDay]!.removeAt(editIndex);
-                      });
-                      await _saveTimetable();
-                      if (oldTitle.isNotEmpty) {
-                        await _deleteSubjectFromBackendServer(oldTitle);
+                      final String targetTitle = existingItem['title'] ?? '';
+                      final subjects = context.read<SubjectProvider>().subjects;
+                      final targetSub = subjects.firstWhere(
+                        (s) => (s['title'] ?? s['name']) == targetTitle,
+                        orElse: () => null,
+                      );
+
+                      if (targetSub != null) {
+                        final int subId = int.tryParse(targetSub['id'].toString()) ?? 0;
+                        await context.read<SubjectProvider>().deleteSubject(subId);
                       }
                       if (mounted) Navigator.pop(context);
                     },
@@ -385,23 +233,20 @@ class _TimetableScreenState extends State<TimetableScreen> {
                     final String endStr = _formatTimeOfDay(endTime);
                     final String timeSlot = '$selectedDay $startStr~$endStr';
 
-                    final newItem = {
-                      'title': title,
-                      'instructor': instructor,
-                      'start_time': startStr,
-                      'end_time': endStr,
-                      'time': '$startStr ~ $endStr',
-                    };
+                    final provider = context.read<SubjectProvider>();
 
-                    setState(() {
-                      if (existingItem != null && editIndex != null) {
-                        _timetable[defaultDay]!.removeAt(editIndex);
+                    if (existingItem != null) {
+                      final targetSub = provider.subjects.firstWhere(
+                        (s) => (s['title'] ?? s['name']) == (existingItem['title'] ?? ''),
+                        orElse: () => null,
+                      );
+                      if (targetSub != null) {
+                        final int subId = int.tryParse(targetSub['id'].toString()) ?? 0;
+                        await provider.updateSubject(subId, title, instructor, timeSlot);
                       }
-                      _timetable[selectedDay]!.add(newItem);
-                    });
-
-                    await _saveTimetable();
-                    await _syncSubjectToBackendServer(title, instructor, timeSlot);
+                    } else {
+                      await provider.addSubject(title, instructor, timeSlot);
+                    }
 
                     if (mounted) Navigator.pop(context);
                   },
@@ -417,6 +262,10 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<SubjectProvider>();
+    final timetable = provider.timetable;
+    final subjects = provider.subjects;
+
     const double rowHeight = 60.0;
     const int startHour = 9;
 
@@ -428,7 +277,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '새로고침',
-            onPressed: _fetchSubjectsFromServer,
+            onPressed: () => context.read<SubjectProvider>().fetchSubjects(),
           ),
           IconButton(
             icon: const Icon(Icons.add),
@@ -501,7 +350,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                       children: [
                         const SizedBox(width: 45),
                         ..._days.map((day) {
-                          final dayClasses = _timetable[day] ?? [];
+                          final dayClasses = timetable[day] ?? [];
                           return Expanded(
                             child: Stack(
                               children: dayClasses.asMap().entries.map((entry) {
@@ -515,7 +364,22 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                 double tileHeight = ((endMin - startMin) / 60.0) * rowHeight;
                                 if (tileHeight < 30) tileHeight = 30;
 
-                                Color tileColor = _cardColors[(item['title'].hashCode).abs() % _cardColors.length];
+                                // 🎨 과목 인덱스 기반 고유 색상 계산
+                                Color tileColor = Colors.indigo.shade100;
+                                final String title = item['title'] ?? '';
+                                final subjectIndex = subjects.indexWhere(
+                                  (s) => (s['title'] ?? s['name']) == title,
+                                );
+
+                                if (subjectIndex != -1) {
+                                  tileColor = _cardColors[subjectIndex % _cardColors.length];
+                                } else {
+                                  int charSum = 0;
+                                  for (int codeUnit in title.codeUnits) {
+                                    charSum += codeUnit;
+                                  }
+                                  tileColor = _cardColors[charSum % _cardColors.length];
+                                }
 
                                 return Positioned(
                                   top: topPosition + 1,
@@ -558,7 +422,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                           if (tileHeight > 45) ...[
                                             const SizedBox(height: 2),
                                             Text(
-                                              item['instructor'] ?? '',
+                                              item['instructor'] ?? item['professor'] ?? '',
                                               style: const TextStyle(
                                                 fontSize: 10,
                                                 color: Colors.black54,

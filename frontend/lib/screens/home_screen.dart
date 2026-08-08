@@ -4,6 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'package:frontend/subject_provider.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -212,97 +214,90 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _addNewSubject(String title, String professor, String timeSlot) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/subjects/'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'title': title,
-          'professor': professor,
-          'time_slot': timeSlot,
-        }),
-      );
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        await _syncSubjectToTimetable(title, professor, timeSlot);
-        _showFeedbackSnackBar('✨ 새 과목이 등록되었으며 시간표에 추가되었습니다!');
-        _fetchSubjects();
-      }
-    } catch (e) {
-      _showFeedbackSnackBar('과목 등록 실패: $e', isError: true);
-    }
-  }
+// 1. 과목 추가 함수
+Future<void> _addNewSubject(String title, String professor, String timeSlot) async {
+  // Provider에서 bool 결과를 받아오도록 처리
+  final bool success = await context.read<SubjectProvider>().addSubject(title, professor, timeSlot);
+  
+  if (!mounted) return;
 
+  if (success) {
+    _showFeedbackSnackBar('✨ 새 과목이 등록되었으며 시간표에 추가되었습니다!');
+  } else {
+    _showFeedbackSnackBar('과목 등록 실패', isError: true);
+  }
+}
+
+  // 2. 과목 수정 함수
   Future<void> _updateSubject(int subjectId, String title, String professor, String timeSlot) async {
-    try {
-      final response = await http.put(
-        Uri.parse('$baseUrl/subjects/$subjectId'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'title': title,
-          'professor': professor,
-          'time_slot': timeSlot,
-        }),
-      );
-      if (response.statusCode == 200) {
-        await _syncSubjectToTimetable(title, professor, timeSlot);
-        _showFeedbackSnackBar('✨ 과목 정보 및 시간표가 수정되었습니다!');
-        _fetchSubjects();
-      }
-    } catch (e) {
-      _showFeedbackSnackBar('과목 수정 실패: $e', isError: true);
+    final success = await context.read<SubjectProvider>().updateSubject(subjectId, title, professor, timeSlot);
+    if (success) {
+      _showFeedbackSnackBar('✨ 과목 정보 및 시간표가 수정되었습니다!');
+    } else {
+      _showFeedbackSnackBar('과목 수정 실패', isError: true);
     }
   }
 
+  // 3. 과목 삭제 함수
   Future<void> _deleteSubject(int subjectId, String title) async {
-    try {
-      final response = await http.delete(Uri.parse('$baseUrl/subjects/$subjectId'));
-      if (response.statusCode == 200) {
-        await _deleteSubjectFromTimetable(title);
-        _showFeedbackSnackBar('과목($title)이 삭제되었습니다.');
-        if (selectedSubjectId == subjectId) {
-          setState(() {
-            selectedSubjectId = null;
-            lectureNotes = [];
-          });
-        }
-        _fetchSubjects();
+    final success = await context.read<SubjectProvider>().deleteSubject(subjectId);
+    if (success) {
+      _showFeedbackSnackBar('과목($title)이 삭제되었습니다.');
+      if (selectedSubjectId == subjectId) {
+        setState(() {
+          selectedSubjectId = null;
+          lectureNotes = [];
+        });
       }
-    } catch (e) {
-      _showFeedbackSnackBar('과목 삭제 실패: $e', isError: true);
+    } else {
+      _showFeedbackSnackBar('과목 삭제 실패', isError: true);
     }
   }
 
-  Future<void> _showEditTitleDialog(int noteId, String currentTitle) async {
+Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
     final controller = TextEditingController(text: currentTitle);
+    
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('노트 제목 수정'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '새 제목'),
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(), 
+            labelText: '새 노트 제목',
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(context), 
+            child: const Text('취소'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('수정'),
+            child: const Text('저장'),
           ),
         ],
       ),
     );
 
-    if (result != null && result.isNotEmpty && selectedSubjectId != null) {
+    if (result != null && result.isNotEmpty && noteId != null) {
       try {
         final response = await http.patch(
           Uri.parse('$baseUrl/lectures/$noteId'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'title': result}),
         );
+
         if (response.statusCode == 200) {
-          _showFeedbackSnackBar('노트 제목이 수정되었습니다.');
-          _fetchNotesForSubject(selectedSubjectId!);
+          _showFeedbackSnackBar('노트 제목이 변경되었습니다.');
+          
+          // 현재 선택된 과목이 있다면 해당 과목의 노트 리스트 다시 로드
+          if (selectedSubjectId != null) {
+            _fetchNotesForSubject(selectedSubjectId!);
+          }
+        } else {
+          _showFeedbackSnackBar('제목 수정 실패 (${response.statusCode})', isError: true);
         }
       } catch (e) {
         _showFeedbackSnackBar('제목 수정 실패: $e', isError: true);
@@ -904,6 +899,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+
+    final subjects = context.watch<SubjectProvider>().subjects;
+
     return Scaffold(
       appBar: AppBar(
         title: const Row(

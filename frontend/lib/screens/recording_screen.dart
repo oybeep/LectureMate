@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:provider/provider.dart';
+import 'package:frontend/subject_provider.dart';
 
 class ChatMessage {
   final String text;
@@ -33,30 +35,17 @@ class _RecordingScreenState extends State<RecordingScreen> {
 
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
+
   bool _isLoading = false;
   String _selectedSubject = "전체 과목"; // 과목 필터용
-  List<String> _subjects = ["전체 과목"];
 
   @override
   void initState() {
     super.initState();
-    _fetchSubjects();
-  }
-
-  // 서버에서 과목 목록 불러오기
-  Future<void> _fetchSubjects() async {
-    try {
-      final response = await http.get(Uri.parse('http://localhost:8000/subjects'));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        setState(() {
-          _subjects = ["전체 과목"] + data.map((e) => e["title"].toString()).toList();
-        });
-      }
-    } catch (_) {
-      // 과목 불러오기 실패 시 기본값 유지
-    }
+    // 화면이 진입할 때 과목 데이터 최신화
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SubjectProvider>().fetchSubjects();
+    });
   }
 
   // AI 검색 API (/api/lectures/search) 호출
@@ -134,6 +123,19 @@ class _RecordingScreenState extends State<RecordingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 💡 SubjectProvider에서 최신 과목 데이터 구독
+    final provider = context.watch<SubjectProvider>();
+    final List<String> subjects = [
+      "전체 과목",
+      ...provider.subjects
+          .map((e) => (e["title"] ?? e["name"] ?? "").toString())
+          .where((title) => title.isNotEmpty)
+          .toList()
+    ];
+
+    // 현재 선택된 과목이 목록에 없으면 '전체 과목'으로 안전하게 복구
+    final currentSelected = subjects.contains(_selectedSubject) ? _selectedSubject : "전체 과목";
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI 강의 질의응답', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -144,7 +146,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
             padding: const EdgeInsets.only(right: 12.0),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
-                value: _subjects.contains(_selectedSubject) ? _selectedSubject : _subjects.first,
+                value: currentSelected,
                 icon: const Icon(Icons.filter_list),
                 onChanged: (String? newValue) {
                   if (newValue != null) {
@@ -153,7 +155,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
                     });
                   }
                 },
-                items: _subjects.map<DropdownMenuItem<String>>((String value) {
+                items: subjects.map<DropdownMenuItem<String>>((String value) {
                   return DropdownMenuItem<String>(
                     value: value,
                     child: Text(
@@ -183,7 +185,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
                   style: TextStyle(fontSize: 13, color: Colors.indigo.shade900, fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  _selectedSubject,
+                  currentSelected,
                   style: const TextStyle(fontSize: 13, color: Colors.indigo, fontWeight: FontWeight.w600),
                 ),
               ],

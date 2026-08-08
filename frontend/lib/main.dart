@@ -1,9 +1,21 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'package:provider/provider.dart'; // 👈 Provider 패키지 임포트
+import 'subject_provider.dart'; // 👈 방금 작성한 SubjectProvider 파일 경로
 import 'screens/main_screen.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          // 앱 실행 시 과목 및 시간표 데이터를 즉시 로드합니다.
+          create: (_) => SubjectProvider()..fetchSubjects(),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 // 📌 API Base URL 도우미 (동적 IP / 에뮬레이터 대응)

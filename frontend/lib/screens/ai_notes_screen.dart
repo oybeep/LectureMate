@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/api_service.dart';
 import '../main.dart'; // ApiConfig 참조
+import 'package:provider/provider.dart';
+import 'package:frontend/subject_provider.dart';
 
 class AiNotesScreen extends StatefulWidget {
   const AiNotesScreen({super.key});
@@ -14,62 +16,45 @@ class AiNotesScreen extends StatefulWidget {
 class _AiNotesScreenState extends State<AiNotesScreen> {
   final ApiService _apiService = ApiService();
 
-  List<dynamic> _subjects = [];
   int? _selectedSubjectId;
 
   List<dynamic> _notes = [];
-  bool _isLoadingSubjects = false;
   bool _isLoadingNotes = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    // 화면이 처음 활성화될 때 Provider 데이터 기반으로 노트 로드
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchSubjects();
+      _syncAndFetchNotes();
     });
   }
 
-  // 1. 과목 목록 불러오기
-  Future<void> _fetchSubjects() async {
-    setState(() {
-      _isLoadingSubjects = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final subjectsData = await _apiService.getSubjects();
+  // Provider 목록을 참조하여 첫 번 과목 노트 불러오기
+  void _syncAndFetchNotes() {
+    final subjects = context.read<SubjectProvider>().subjects;
+    if (subjects.isNotEmpty) {
+      if (_selectedSubjectId == null ||
+          !subjects.any((s) => int.tryParse(s['id'].toString()) == _selectedSubjectId)) {
+        _selectedSubjectId = int.tryParse(subjects.first['id'].toString());
+      }
+      if (_selectedSubjectId != null) {
+        _fetchNotesForSubject(_selectedSubjectId!);
+      }
+    } else {
       setState(() {
-        _subjects = subjectsData;
-        if (_subjects.isNotEmpty) {
-          // 기존 선택값이 목록에 없는 경우 첫 번째 과목 선택
-          if (_selectedSubjectId == null ||
-              !_subjects.any((s) => int.tryParse(s['id'].toString()) == _selectedSubjectId)) {
-            _selectedSubjectId = int.tryParse(_subjects.first['id'].toString());
-          }
-          if (_selectedSubjectId != null) {
-            _fetchNotesForSubject(_selectedSubjectId!);
-          }
-        } else {
-          _selectedSubjectId = null;
-          _notes = [];
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = '과목 목록을 불러오는 중 오류가 발생했습니다: $e';
-      });
-    } finally {
-      setState(() {
-        _isLoadingSubjects = false;
+        _selectedSubjectId = null;
+        _notes = [];
       });
     }
   }
 
-  // 2. 선택된 과목의 강의 요약 노트 목록 불러오기
+  // 선택된 과목의 강의 요약 노트 목록 불러오기
   Future<void> _fetchNotesForSubject(int subjectId) async {
     setState(() {
       _isLoadingNotes = true;
+      _errorMessage = null;
     });
 
     try {
@@ -80,6 +65,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     } catch (e) {
       setState(() {
         _notes = [];
+        _errorMessage = '노트를 불러오는 중 오류가 발생했습니다: $e';
       });
     } finally {
       setState(() {
@@ -88,7 +74,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // 3. 강의 노트 제목 수정 API 호출
+  // 강의 노트 제목 수정 API 호출
   Future<void> _renameLectureNote(int lectureId, String newTitle) async {
     try {
       final baseUrl = ApiConfig.baseUrl;
@@ -123,7 +109,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // 4. 제목 수정 다이얼로그
+  // 제목 수정 다이얼로그
   void _showEditTitleDialog(int lectureId, String currentTitle) {
     final titleController = TextEditingController(text: currentTitle);
 
@@ -173,7 +159,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     );
   }
 
-  // 5. AI 퀴즈 풀어보기 모달 다이얼로그
+  // AI 퀴즈 풀어보기 모달 다이얼로그
   void _showQuizDialog(List<dynamic> quizzes) {
     if (quizzes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -307,6 +293,19 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Provider로부터 실시간 최신 과목 목록을 관찰(watch)합니다.
+    final subjects = context.watch<SubjectProvider>().subjects;
+
+    // 현재 선택된 ID가 실제 subjects 리스트 안에 존재하는지 안전 검사 (에러 방지 핵심)
+    final bool isSelectedValid = subjects.any(
+      (s) => int.tryParse(s['id'].toString()) == _selectedSubjectId,
+    );
+
+    // 만약 선택된 과목이 목록에 없으면 첫 번째 과목으로 자동 보정
+    final int? currentSelectedValue = isSelectedValid
+        ? _selectedSubjectId
+        : (subjects.isNotEmpty ? int.tryParse(subjects.first['id'].toString()) : null);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI 강의 요약 노트', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -315,7 +314,12 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '새로고침',
-            onPressed: _fetchSubjects,
+            onPressed: () {
+              context.read<SubjectProvider>().fetchSubjects();
+              if (currentSelectedValue != null) {
+                _fetchNotesForSubject(currentSelectedValue);
+              }
+            },
           ),
         ],
       ),
@@ -331,43 +335,35 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                 const SizedBox(width: 12),
                 const Text('과목 선택: ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 Expanded(
-                  child: _isLoadingSubjects
-                      ? const Center(
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                  child: subjects.isEmpty
+                      ? const Text('등록된 과목이 없습니다.')
+                      : DropdownButtonHideUnderline(
+                          child: DropdownButton<int>(
+                            value: currentSelectedValue,
+                            isExpanded: true,
+                            items: subjects.map<DropdownMenuItem<int>>((sub) {
+                              final int subId = int.tryParse(sub['id'].toString()) ?? 0;
+                              final String profName = sub['instructor'] ??
+                                  sub['professor'] ??
+                                  sub['professor_name'] ??
+                                  '교수 미지정';
+                              final String subTitle =
+                                  sub['title'] ?? sub['name'] ?? sub['subject_name'] ?? '과목';
+                              return DropdownMenuItem<int>(
+                                value: subId,
+                                child: Text('$subTitle ($profName)'),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() {
+                                  _selectedSubjectId = val;
+                                });
+                                _fetchNotesForSubject(val);
+                              }
+                            },
                           ),
-                        )
-                      : _subjects.isEmpty
-                          ? const Text('등록된 과목이 없습니다.')
-                          : DropdownButtonHideUnderline(
-                              child: DropdownButton<int>(
-                                value: _selectedSubjectId,
-                                isExpanded: true,
-                                items: _subjects.map<DropdownMenuItem<int>>((sub) {
-                                  final int subId = int.tryParse(sub['id'].toString()) ?? 0;
-                                  final String profName = sub['instructor'] ??
-                                      sub['professor'] ??
-                                      sub['professor_name'] ??
-                                      '교수 미지정';
-                                  final String subTitle =
-                                      sub['title'] ?? sub['name'] ?? sub['subject_name'] ?? '과목';
-                                  return DropdownMenuItem<int>(
-                                    value: subId,
-                                    child: Text('$subTitle ($profName)'),
-                                  );
-                                }).toList(),
-                                onChanged: (val) {
-                                  if (val != null) {
-                                    setState(() {
-                                      _selectedSubjectId = val;
-                                    });
-                                    _fetchNotesForSubject(val);
-                                  }
-                                },
-                              ),
-                            ),
+                        ),
                 ),
               ],
             ),
