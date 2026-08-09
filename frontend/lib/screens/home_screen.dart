@@ -305,7 +305,69 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
     }
   }
 
-  void _showAddSubjectDialog(BuildContext context) async {
+// 노트 삭제 확인 다이얼로그
+  void _confirmDeleteNote(int noteId, String noteTitle) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.delete_outline, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('노트 삭제'),
+          ],
+        ),
+        content: Text("'$noteTitle' 노트를 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.pop(context);
+              await _deleteLectureNote(noteId);
+            },
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 백엔드 노트 삭제 API 호출
+  Future<void> _deleteLectureNote(int noteId) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/lectures/$noteId'),
+      );
+
+      if (response.statusCode == 200) {
+        _showFeedbackSnackBar('노트가 삭제되었습니다.');
+        
+        // 삭제 후 현재 과목 노트 리스트 갱신 및 방금 생성된 노트 초기화
+        if (selectedSubjectId != null) {
+          await _fetchNotesForSubject(selectedSubjectId!);
+        }
+        setState(() {
+          if (latestNoteData != null &&
+              (latestNoteData!['id'] ?? latestNoteData!['lecture_id']).toString() == noteId.toString()) {
+            latestNoteData = null;
+          }
+        });
+      } else {
+        _showFeedbackSnackBar('노트 삭제 실패 (${response.statusCode})', isError: true);
+      }
+    } catch (e) {
+      _showFeedbackSnackBar('네트워크 오류로 노트를 삭제하지 못했습니다: $e', isError: true);
+    }
+  }
+
+void _showAddSubjectDialog(BuildContext context) async {
     final titleController = TextEditingController();
     final professorController = TextEditingController();
 
@@ -455,9 +517,29 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
     final titleController = TextEditingController(text: subject['title'] ?? subject['name'] ?? '');
     final professorController = TextEditingController(text: subject['instructor'] ?? subject['professor'] ?? '');
 
+    // ✨ [수정] 기존 time_slot 파싱 로직 추가 ('월 09:00~10:30' 형식 분해)
     String selectedDay = '월';
     TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 0);
     TimeOfDay endTime = const TimeOfDay(hour: 10, minute: 30);
+
+    final String rawTimeSlot = subject['time_slot'] ?? subject['time'] ?? subject['schedule'] ?? '';
+    if (rawTimeSlot.isNotEmpty) {
+      try {
+        final parts = rawTimeSlot.split(' ');
+        if (parts.isNotEmpty && ['월', '화', '수', '목', '금'].contains(parts[0])) {
+          selectedDay = parts[0];
+        }
+        if (parts.length > 1 && parts[1].contains('~')) {
+          final times = parts[1].split('~');
+          final startSplit = times[0].split(':');
+          final endSplit = times[1].split(':');
+          startTime = TimeOfDay(hour: int.parse(startSplit[0]), minute: int.parse(startSplit[1]));
+          endTime = TimeOfDay(hour: int.parse(endSplit[0]), minute: int.parse(endSplit[1]));
+        }
+      } catch (_) {
+        // 파싱 예외 발생 시 기본값 유지
+      }
+    }
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -1113,36 +1195,43 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
                   ),
                 )
               else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: lectureNotes.length,
-                  itemBuilder: (context, index) {
-                    final note = Map<String, dynamic>.from(lectureNotes[index]);
-                    final int noteId = int.parse((note['id'] ?? note['lecture_id']).toString());
-                    final String noteTitle = note['title'] ?? note['filename'] ?? '강의 노트 ${index + 1}';
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: lectureNotes.length,
+                itemBuilder: (context, index) {
+                  final note = Map<String, dynamic>.from(lectureNotes[index]);
+                  final int noteId = int.parse((note['id'] ?? note['lecture_id']).toString());
+                  final String noteTitle = note['title'] ?? note['filename'] ?? '강의 노트 ${index + 1}';
 
-                    return Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.article, color: Colors.indigo),
-                        title: Text(noteTitle),
-                        subtitle: Text(note['created_at'] ?? '저장됨'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit_outlined, color: Colors.indigo, size: 20),
-                              tooltip: '노트 제목 수정',
-                              onPressed: () => _showEditTitleDialog(noteId, noteTitle),
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        onTap: () => _showNoteDetailModal(note),
+                  return Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.article, color: Colors.indigo),
+                      title: Text(noteTitle),
+                      subtitle: Text(note['created_at'] ?? '저장됨'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // ✏️ 노트 제목 수정 버튼
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, color: Colors.indigo, size: 20),
+                            tooltip: '노트 제목 수정',
+                            onPressed: () => _showEditTitleDialog(noteId, noteTitle),
+                          ),
+                          // 🗑️ [신규 추가] 노트 삭제 버튼
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                            tooltip: '노트 삭제',
+                            onPressed: () => _confirmDeleteNote(noteId, noteTitle),
+                          ),
+                          const Icon(Icons.chevron_right),
+                        ],
                       ),
-                    );
-                  },
-                ),
+                      onTap: () => _showNoteDetailModal(note),
+                    ),
+                  );
+                },
+              ),
               const SizedBox(height: 20),
             ],
             Row(

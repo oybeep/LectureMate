@@ -109,6 +109,75 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
+  // ✨ 강의 노트 삭제 API 호출
+  Future<void> _deleteLectureNote(int lectureId) async {
+    try {
+      final baseUrl = ApiConfig.baseUrl;
+      final response = await http.delete(
+        Uri.parse('$baseUrl/lectures/$lectureId'),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('노트가 삭제되었습니다.')),
+          );
+        }
+        if (_selectedSubjectId != null) {
+          await _fetchNotesForSubject(_selectedSubjectId!);
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('노트 삭제 실패 (${response.statusCode})')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('네트워크 오류로 노트를 삭제하지 못했습니다: $e')),
+        );
+      }
+    }
+  }
+
+  // ✨ 삭제 확인 다이얼로그
+  void _showDeleteConfirmDialog(int lectureId, String noteTitle) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.delete_outline, color: Colors.redAccent),
+              SizedBox(width: 8),
+              Text('노트 삭제'),
+            ],
+          ),
+          content: Text("'$noteTitle' 노트를 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다."),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                Navigator.pop(context);
+                await _deleteLectureNote(lectureId);
+              },
+              child: const Text('삭제'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // 제목 수정 다이얼로그
   void _showEditTitleDialog(int lectureId, String currentTitle) {
     final titleController = TextEditingController(text: currentTitle);
@@ -445,6 +514,15 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                             onPressed: () =>
                                                 _showEditTitleDialog(noteId, titleText),
                                           ),
+                                          // ✨ 노트 삭제 버튼 추가
+                                          IconButton(
+                                            icon: const Icon(Icons.delete_outline,
+                                                color: Colors.redAccent, size: 20),
+                                            tooltip: '노트 삭제',
+                                            onPressed: () =>
+                                                _showDeleteConfirmDialog(noteId, titleText),
+                                          ),
+                                          const SizedBox(width: 4),
                                           Text(
                                             displayDate,
                                             style: const TextStyle(
