@@ -7,8 +7,9 @@ class ApiService {
   final Dio _dio = Dio(
     BaseOptions(
       baseUrl: ApiConfig.baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(minutes: 3), // STT/LLM 처리 시간을 고려하여 넉넉히 설정
+      connectTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(minutes: 10), // 대용량 음성 업로드 시간 고려 (10분)
+      receiveTimeout: const Duration(minutes: 10), // STT, AI 요약, DB 처리 시간을 고려하여 넉넉히 설정 (10분)
       headers: {
         'Accept': 'application/json',
       },

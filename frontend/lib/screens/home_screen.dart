@@ -3,9 +3,70 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'package:record/record.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:frontend/subject_provider.dart';
+
+// ---------------------------------------------------------------------------
+// 🗓️ 동적 수업 일정 모델 (요일, 시간, 강의실)
+// ---------------------------------------------------------------------------
+class CourseScheduleItem {
+  String day;
+  TimeOfDay startTime;
+  TimeOfDay endTime;
+  String room;
+
+  CourseScheduleItem({
+    required this.day,
+    required this.startTime,
+    required this.endTime,
+    this.room = '',
+  });
+
+  // time_slot 문자열 변환 (예: "화 09:30~11:00 (E동513호)")
+  String toSlotString() {
+    final startStr =
+        '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}';
+    final endStr =
+        '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
+    final roomStr = room.trim().isNotEmpty ? ' ($room)' : '';
+    return '$day $startStr~$endStr$roomStr';
+  }
+
+  // "화 09:30~11:00 (E동513호)" 형태의 문자열 파싱
+  static CourseScheduleItem fromSlotString(String slot) {
+    String day = '월';
+    TimeOfDay start = const TimeOfDay(hour: 9, minute: 0);
+    TimeOfDay end = const TimeOfDay(hour: 10, minute: 30);
+    String room = '';
+
+    try {
+      final roomReg = RegExp(r'\((.*?)\)');
+      final roomMatch = roomReg.firstMatch(slot);
+      if (roomMatch != null) {
+        room = roomMatch.group(1) ?? '';
+      }
+
+      final cleanSlot = slot.replaceAll(RegExp(r'\s*\(.*?\)\s*'), '').trim();
+      final parts = cleanSlot.split(' ');
+      if (parts.isNotEmpty && ['월', '화', '수', '목', '금', '토'].contains(parts[0])) {
+        day = parts[0];
+      }
+
+      if (parts.length > 1 && parts[1].contains('~')) {
+        final times = parts[1].split('~');
+        final startSplit = times[0].split(':');
+        final endSplit = times[1].split(':');
+        start = TimeOfDay(
+            hour: int.parse(startSplit[0]), minute: int.parse(startSplit[1]));
+        end = TimeOfDay(
+            hour: int.parse(endSplit[0]), minute: int.parse(endSplit[1]));
+      }
+    } catch (_) {}
+
+    return CourseScheduleItem(
+        day: day, startTime: start, endTime: end, room: room);
+  }
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,14 +80,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // 상태 변수
   String serverStatus = '서버 연결 확인 중...';
-  List<dynamic> subjects = [];
   int? selectedSubjectId;
 
   List<dynamic> lectureNotes = [];
   bool isLoadingNotes = false;
 
   bool isRecording = false;
-  bool isPaused = false; // ⏸️ 일시정지 상태 변수
+  bool isPaused = false;
   bool isProcessing = false;
   String processStatus = '대기 중...';
   Map<String, dynamic>? latestNoteData;
@@ -47,79 +107,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _audioRecorder.dispose();
     super.dispose();
-  }
-
-  // ---------------------------------------------------------------------------
-  // 🗓️ 시간표(SharedPreferences) 연동 헬퍼 메서드들
-  // ---------------------------------------------------------------------------
-  
-  Future<void> _syncSubjectToTimetable(String title, String professor, String timeSlot) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? savedData = prefs.getString('user_timetable');
-
-      Map<String, List<Map<String, String>>> timetable = {
-        '월': [], '화': [], '수': [], '목': [], '금': [],
-      };
-
-      if (savedData != null) {
-        final Map<String, dynamic> decoded = jsonDecode(savedData);
-        timetable = decoded.map((key, value) {
-          final list = (value as List).map((item) => Map<String, String>.from(item)).toList();
-          return MapEntry(key, list);
-        });
-      }
-
-      final parts = timeSlot.split(' ');
-      if (parts.length >= 2) {
-        String day = parts[0];
-        final times = parts[1].split('~');
-
-        if (timetable.containsKey(day) && times.length == 2) {
-          String startTime = times[0];
-          String endTime = times[1];
-
-          for (var key in timetable.keys) {
-            timetable[key]!.removeWhere((item) => item['title'] == title);
-          }
-
-          timetable[day]!.add({
-            'title': title,
-            'instructor': professor.isEmpty ? '미지정' : professor,
-            'start_time': startTime,
-            'end_time': endTime,
-            'time': '$startTime ~ $endTime',
-          });
-
-          await prefs.setString('user_timetable', jsonEncode(timetable));
-        }
-      }
-    } catch (e) {
-      debugPrint('시간표 동기화 에러: $e');
-    }
-  }
-
-  Future<void> _deleteSubjectFromTimetable(String title) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? savedData = prefs.getString('user_timetable');
-
-      if (savedData != null) {
-        final Map<String, dynamic> decoded = jsonDecode(savedData);
-        Map<String, List<Map<String, String>>> timetable = decoded.map((key, value) {
-          final list = (value as List).map((item) => Map<String, String>.from(item)).toList();
-          return MapEntry(key, list);
-        });
-
-        for (var day in timetable.keys) {
-          timetable[day]!.removeWhere((item) => item['title'] == title);
-        }
-
-        await prefs.setString('user_timetable', jsonEncode(timetable));
-      }
-    } catch (e) {
-      debugPrint('시간표 삭제 동기화 에러: $e');
-    }
   }
 
   // Helper Methods
@@ -159,10 +146,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // API 네트워크 통신 메서드들
+  // API 네트워크 통신 메서드
   Future<void> _checkServerStatus() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/health')).timeout(const Duration(seconds: 5));
+      final response = await http
+          .get(Uri.parse('$baseUrl/health'))
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         setState(() {
           serverStatus = '🟢 백엔드 서버가 정상 작동 중입니다.';
@@ -181,13 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchSubjects() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/subjects/'));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        setState(() {
-          subjects = data;
-        });
-      }
+      await context.read<SubjectProvider>().fetchSubjects();
     } catch (e) {
       _showFeedbackSnackBar('과목 목록 불러오기 실패: $e', isError: true);
     }
@@ -198,7 +181,8 @@ class _HomeScreenState extends State<HomeScreen> {
       isLoadingNotes = true;
     });
     try {
-      final response = await http.get(Uri.parse('$baseUrl/lectures/subject/$subjectId'));
+      final response =
+          await http.get(Uri.parse('$baseUrl/lectures/subject/$subjectId'));
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
         setState(() {
@@ -214,23 +198,28 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-// 1. 과목 추가 함수
-Future<void> _addNewSubject(String title, String professor, String timeSlot) async {
-  // Provider에서 bool 결과를 받아오도록 처리
-  final bool success = await context.read<SubjectProvider>().addSubject(title, professor, timeSlot);
-  
-  if (!mounted) return;
+  // 1. 과목 추가
+  Future<void> _addNewSubject(
+      String title, String professor, String timeSlot) async {
+    final bool success = await context
+        .read<SubjectProvider>()
+        .addSubject(title, professor, timeSlot);
 
-  if (success) {
-    _showFeedbackSnackBar('✨ 새 과목이 등록되었으며 시간표에 추가되었습니다!');
-  } else {
-    _showFeedbackSnackBar('과목 등록 실패', isError: true);
+    if (!mounted) return;
+
+    if (success) {
+      _showFeedbackSnackBar('✨ 새 과목이 등록되었으며 시간표에 추가되었습니다!');
+    } else {
+      _showFeedbackSnackBar('과목 등록 실패', isError: true);
+    }
   }
-}
 
-  // 2. 과목 수정 함수
-  Future<void> _updateSubject(int subjectId, String title, String professor, String timeSlot) async {
-    final success = await context.read<SubjectProvider>().updateSubject(subjectId, title, professor, timeSlot);
+  // 2. 과목 수정
+  Future<void> _updateSubject(
+      int subjectId, String title, String professor, String timeSlot) async {
+    final success = await context
+        .read<SubjectProvider>()
+        .updateSubject(subjectId, title, professor, timeSlot);
     if (success) {
       _showFeedbackSnackBar('✨ 과목 정보 및 시간표가 수정되었습니다!');
     } else {
@@ -238,9 +227,10 @@ Future<void> _addNewSubject(String title, String professor, String timeSlot) asy
     }
   }
 
-  // 3. 과목 삭제 함수
+  // 3. 과목 삭제
   Future<void> _deleteSubject(int subjectId, String title) async {
-    final success = await context.read<SubjectProvider>().deleteSubject(subjectId);
+    final success =
+        await context.read<SubjectProvider>().deleteSubject(subjectId);
     if (success) {
       _showFeedbackSnackBar('과목($title)이 삭제되었습니다.');
       if (selectedSubjectId == subjectId) {
@@ -254,9 +244,9 @@ Future<void> _addNewSubject(String title, String professor, String timeSlot) asy
     }
   }
 
-Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
+  Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
     final controller = TextEditingController(text: currentTitle);
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -264,13 +254,13 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
-            border: OutlineInputBorder(), 
+            border: OutlineInputBorder(),
             labelText: '새 노트 제목',
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context), 
+            onPressed: () => Navigator.pop(context),
             child: const Text('취소'),
           ),
           ElevatedButton(
@@ -291,13 +281,13 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
 
         if (response.statusCode == 200) {
           _showFeedbackSnackBar('노트 제목이 변경되었습니다.');
-          
-          // 현재 선택된 과목이 있다면 해당 과목의 노트 리스트 다시 로드
+
           if (selectedSubjectId != null) {
             _fetchNotesForSubject(selectedSubjectId!);
           }
         } else {
-          _showFeedbackSnackBar('제목 수정 실패 (${response.statusCode})', isError: true);
+          _showFeedbackSnackBar('제목 수정 실패 (${response.statusCode})',
+              isError: true);
         }
       } catch (e) {
         _showFeedbackSnackBar('제목 수정 실패: $e', isError: true);
@@ -305,7 +295,6 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
     }
   }
 
-// 노트 삭제 확인 다이얼로그
   void _confirmDeleteNote(int noteId, String noteTitle) {
     showDialog(
       context: context,
@@ -339,7 +328,6 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
     );
   }
 
-  // 백엔드 노트 삭제 API 호출
   Future<void> _deleteLectureNote(int noteId) async {
     try {
       final response = await http.delete(
@@ -348,64 +336,183 @@ Future<void> _showEditTitleDialog(dynamic noteId, String currentTitle) async {
 
       if (response.statusCode == 200) {
         _showFeedbackSnackBar('노트가 삭제되었습니다.');
-        
-        // 삭제 후 현재 과목 노트 리스트 갱신 및 방금 생성된 노트 초기화
+
         if (selectedSubjectId != null) {
           await _fetchNotesForSubject(selectedSubjectId!);
         }
         setState(() {
           if (latestNoteData != null &&
-              (latestNoteData!['id'] ?? latestNoteData!['lecture_id']).toString() == noteId.toString()) {
+              (latestNoteData!['id'] ?? latestNoteData!['lecture_id'])
+                      .toString() ==
+                  noteId.toString()) {
             latestNoteData = null;
           }
         });
       } else {
-        _showFeedbackSnackBar('노트 삭제 실패 (${response.statusCode})', isError: true);
+        _showFeedbackSnackBar('노트 삭제 실패 (${response.statusCode})',
+            isError: true);
       }
     } catch (e) {
       _showFeedbackSnackBar('네트워크 오류로 노트를 삭제하지 못했습니다: $e', isError: true);
     }
   }
 
-void _showAddSubjectDialog(BuildContext context) async {
+  // ---------------------------------------------------------------------------
+  // 🗓️ 동적 시간표 리스트 다이얼로그 - 등록/수정 공통 위젯
+  // ---------------------------------------------------------------------------
+  Widget _buildScheduleEditor(
+    List<CourseScheduleItem> schedules,
+    StateSetter setDialogState,
+  ) {
+    String formatTime(TimeOfDay t) {
+      final hour = t.hour.toString().padLeft(2, '0');
+      final minute = t.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    }
+
+    Future<void> pickTime(CourseScheduleItem item, bool isStart) async {
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: isStart ? item.startTime : item.endTime,
+      );
+      if (picked != null) {
+        setDialogState(() {
+          if (isStart) {
+            item.startTime = picked;
+          } else {
+            item.endTime = picked;
+          }
+        });
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('수업 일정 목록',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            TextButton.icon(
+              onPressed: () {
+                setDialogState(() {
+                  schedules.add(CourseScheduleItem(
+                    day: '화',
+                    startTime: const TimeOfDay(hour: 11, minute: 0),
+                    endTime: const TimeOfDay(hour: 12, minute: 30),
+                  ));
+                });
+              },
+              icon: const Icon(Icons.add_circle_outline, size: 18),
+              label: const Text('시간 추가'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ...schedules.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final item = entry.value;
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            color: Colors.grey.shade50,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: Colors.grey.shade300),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      DropdownButton<String>(
+                        value: item.day,
+                        underline: const SizedBox(),
+                        items: ['월', '화', '수', '목', '금', '토'].map((d) {
+                          return DropdownMenuItem(
+                              value: d,
+                              child: Text(d,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)));
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) setDialogState(() => item.day = val);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8)),
+                        onPressed: () => pickTime(item, true),
+                        child: Text(formatTime(item.startTime)),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 4.0),
+                        child: Text('~'),
+                      ),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8)),
+                        onPressed: () => pickTime(item, false),
+                        child: Text(formatTime(item.endTime)),
+                      ),
+                      const Spacer(),
+                      if (schedules.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle,
+                              color: Colors.redAccent, size: 20),
+                          onPressed: () =>
+                              setDialogState(() => schedules.removeAt(idx)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    decoration: const InputDecoration(
+                      hintText: '강의실 (예: E동 513호)',
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      border: OutlineInputBorder(),
+                    ),
+                    controller: TextEditingController(text: item.room)
+                      ..selection =
+                          TextSelection.collapsed(offset: item.room.length),
+                    onChanged: (val) => item.room = val,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  void _showAddSubjectDialog(BuildContext context) async {
     final titleController = TextEditingController();
     final professorController = TextEditingController();
 
-    String selectedDay = '월';
-    TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 0);
-    TimeOfDay endTime = const TimeOfDay(hour: 10, minute: 30);
+    List<CourseScheduleItem> schedules = [
+      CourseScheduleItem(
+        day: '월',
+        startTime: const TimeOfDay(hour: 9, minute: 0),
+        endTime: const TimeOfDay(hour: 10, minute: 30),
+      )
+    ];
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            Future<void> pickTime(bool isStart) async {
-              final picked = await showTimePicker(
-                context: context,
-                initialTime: isStart ? startTime : endTime,
-              );
-              if (picked != null) {
-                setDialogState(() {
-                  if (isStart) {
-                    startTime = picked;
-                  } else {
-                    endTime = picked;
-                  }
-                });
-              }
-            }
-
-            String formatTime(TimeOfDay t) {
-              final hour = t.hour.toString().padLeft(2, '0');
-              final minute = t.minute.toString().padLeft(2, '0');
-              return '$hour:$minute';
-            }
-
             return AlertDialog(
-              title: const Text('✨ 새 수강 과목 추가', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: const Text('✨ 새 수강 과목 추가',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               content: SizedBox(
-                width: 400,
+                width: 450,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -415,11 +522,11 @@ void _showAddSubjectDialog(BuildContext context) async {
                         controller: titleController,
                         decoration: const InputDecoration(
                           labelText: '과목명',
-                          hintText: '예: 인공지능학',
+                          hintText: '예: 데이터시각화',
                           border: OutlineInputBorder(),
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: professorController,
                         decoration: const InputDecoration(
@@ -428,50 +535,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                           border: OutlineInputBorder(),
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      const Text('강의 요일', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: ['월', '화', '수', '목', '금'].map((day) {
-                          final isSelected = selectedDay == day;
-                          return ChoiceChip(
-                            label: Text(day),
-                            selected: isSelected,
-                            onSelected: (selected) {
-                              setDialogState(() {
-                                selectedDay = day;
-                              });
-                            },
-                            selectedColor: Colors.indigo.shade100,
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text('강의 시간', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => pickTime(true),
-                              icon: const Icon(Icons.access_time, size: 16),
-                              label: Text(formatTime(startTime)),
-                            ),
-                          ),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8.0),
-                            child: Text('~'),
-                          ),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => pickTime(false),
-                              icon: const Icon(Icons.access_time, size: 16),
-                              label: Text(formatTime(endTime)),
-                            ),
-                          ),
-                        ],
-                      ),
+                      const SizedBox(height: 16),
+                      _buildScheduleEditor(schedules, setDialogState),
                     ],
                   ),
                 ),
@@ -487,7 +552,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                     final profName = professorController.text.trim();
                     if (subName.isEmpty) return;
 
-                    final finalTimeSlot = '$selectedDay ${formatTime(startTime)}~${formatTime(endTime)}';
+                    final finalTimeSlot =
+                        schedules.map((s) => s.toSlotString()).join(', ');
 
                     Navigator.pop(context, {
                       'title': subName,
@@ -514,31 +580,28 @@ void _showAddSubjectDialog(BuildContext context) async {
   }
 
   void _showEditSubjectDialog(Map<String, dynamic> subject) async {
-    final titleController = TextEditingController(text: subject['title'] ?? subject['name'] ?? '');
-    final professorController = TextEditingController(text: subject['instructor'] ?? subject['professor'] ?? '');
+    final titleController =
+        TextEditingController(text: subject['title'] ?? subject['name'] ?? '');
+    final professorController = TextEditingController(
+        text: subject['instructor'] ?? subject['professor'] ?? '');
 
-    // ✨ [수정] 기존 time_slot 파싱 로직 추가 ('월 09:00~10:30' 형식 분해)
-    String selectedDay = '월';
-    TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 0);
-    TimeOfDay endTime = const TimeOfDay(hour: 10, minute: 30);
+    List<CourseScheduleItem> schedules = [];
+    final String rawTimeSlot =
+        subject['time_slot'] ?? subject['time'] ?? subject['schedule'] ?? '';
 
-    final String rawTimeSlot = subject['time_slot'] ?? subject['time'] ?? subject['schedule'] ?? '';
     if (rawTimeSlot.isNotEmpty) {
-      try {
-        final parts = rawTimeSlot.split(' ');
-        if (parts.isNotEmpty && ['월', '화', '수', '목', '금'].contains(parts[0])) {
-          selectedDay = parts[0];
-        }
-        if (parts.length > 1 && parts[1].contains('~')) {
-          final times = parts[1].split('~');
-          final startSplit = times[0].split(':');
-          final endSplit = times[1].split(':');
-          startTime = TimeOfDay(hour: int.parse(startSplit[0]), minute: int.parse(startSplit[1]));
-          endTime = TimeOfDay(hour: int.parse(endSplit[0]), minute: int.parse(endSplit[1]));
-        }
-      } catch (_) {
-        // 파싱 예외 발생 시 기본값 유지
+      final slotParts = rawTimeSlot.split(', ');
+      for (var slot in slotParts) {
+        schedules.add(CourseScheduleItem.fromSlotString(slot));
       }
+    }
+
+    if (schedules.isEmpty) {
+      schedules.add(CourseScheduleItem(
+        day: '월',
+        startTime: const TimeOfDay(hour: 9, minute: 0),
+        endTime: const TimeOfDay(hour: 10, minute: 30),
+      ));
     }
 
     final result = await showDialog<Map<String, dynamic>>(
@@ -546,32 +609,11 @@ void _showAddSubjectDialog(BuildContext context) async {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            Future<void> pickTime(bool isStart) async {
-              final picked = await showTimePicker(
-                context: context,
-                initialTime: isStart ? startTime : endTime,
-              );
-              if (picked != null) {
-                setDialogState(() {
-                  if (isStart) {
-                    startTime = picked;
-                  } else {
-                    endTime = picked;
-                  }
-                });
-              }
-            }
-
-            String formatTime(TimeOfDay t) {
-              final hour = t.hour.toString().padLeft(2, '0');
-              final minute = t.minute.toString().padLeft(2, '0');
-              return '$hour:$minute';
-            }
-
             return AlertDialog(
-              title: const Text('✏️ 수강 과목 수정', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: const Text('✏️ 수강 과목 수정',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               content: SizedBox(
-                width: 400,
+                width: 450,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -584,7 +626,7 @@ void _showAddSubjectDialog(BuildContext context) async {
                           border: OutlineInputBorder(),
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: professorController,
                         decoration: const InputDecoration(
@@ -592,50 +634,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                           border: OutlineInputBorder(),
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      const Text('강의 요일', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: ['월', '화', '수', '목', '금'].map((day) {
-                          final isSelected = selectedDay == day;
-                          return ChoiceChip(
-                            label: Text(day),
-                            selected: isSelected,
-                            onSelected: (selected) {
-                              setDialogState(() {
-                                selectedDay = day;
-                              });
-                            },
-                            selectedColor: Colors.indigo.shade100,
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 20),
-                      const Text('강의 시간', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => pickTime(true),
-                              icon: const Icon(Icons.access_time, size: 16),
-                              label: Text(formatTime(startTime)),
-                            ),
-                          ),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8.0),
-                            child: Text('~'),
-                          ),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => pickTime(false),
-                              icon: const Icon(Icons.access_time, size: 16),
-                              label: Text(formatTime(endTime)),
-                            ),
-                          ),
-                        ],
-                      ),
+                      const SizedBox(height: 16),
+                      _buildScheduleEditor(schedules, setDialogState),
                     ],
                   ),
                 ),
@@ -651,7 +651,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                     final profName = professorController.text.trim();
                     if (subName.isEmpty) return;
 
-                    final finalTimeSlot = '$selectedDay ${formatTime(startTime)}~${formatTime(endTime)}';
+                    final finalTimeSlot =
+                        schedules.map((s) => s.toSlotString()).join(', ');
 
                     Navigator.pop(context, {
                       'title': subName,
@@ -685,14 +686,15 @@ void _showAddSubjectDialog(BuildContext context) async {
       return;
     }
 
-    FilePickerResult? result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['mp3', 'wav', 'm4a', 'mp4'],
-      withData: true,
-    );
+FilePickerResult? result = await FilePicker.pickFiles(
+  type: FileType.custom,
+  allowedExtensions: ['mp3', 'wav', 'm4a', 'mp4'],
+  withData: true,
+);
 
     if (result != null && result.files.single.bytes != null) {
-      _processAudioPipeline(result.files.single.bytes!, result.files.single.name);
+      _processAudioPipeline(
+          result.files.single.bytes!, result.files.single.name);
     }
   }
 
@@ -716,7 +718,9 @@ void _showAddSubjectDialog(BuildContext context) async {
 
         if (path != null) {
           final response = await http.get(Uri.parse(path));
-          await _processAudioPipeline(response.bodyBytes, 'lecture_recorded_${DateTime.now().millisecondsSinceEpoch}.m4a');
+          await _processAudioPipeline(
+              response.bodyBytes,
+              'lecture_recorded_${DateTime.now().millisecondsSinceEpoch}.m4a');
         }
       } else {
         if (await _audioRecorder.hasPermission()) {
@@ -775,11 +779,14 @@ void _showAddSubjectDialog(BuildContext context) async {
     });
 
     try {
-      var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/lectures/upload'));
+      var request =
+          http.MultipartRequest('POST', Uri.parse('$baseUrl/lectures/upload'));
       request.fields['subject_id'] = selectedSubjectId.toString();
-      request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: fileName));
+      request.files.add(
+          http.MultipartFile.fromBytes('file', bytes, filename: fileName));
 
-      var streamedResponse = await request.send().timeout(const Duration(minutes: 3));
+      var streamedResponse =
+          await request.send().timeout(const Duration(minutes: 10));
       var response = await http.Response.fromStream(streamedResponse);
 
       if (!mounted) return;
@@ -791,8 +798,12 @@ void _showAddSubjectDialog(BuildContext context) async {
           'id': resData['id'] ?? resData['lecture_id'],
           'title': resData['title'] ?? fileName,
           'summary': resData['summary'] ?? resData['message'] ?? '요약 결과가 없습니다.',
-          'transcript': resData['transcript'] ?? resData['stt_transcript'] ?? 'STT 음성 변환 기록이 없습니다.',
-          'keywords': resData['keywords'] ?? resData['key_concepts'] ?? ['강의 핵심', 'AI 분석'],
+          'transcript': resData['transcript'] ??
+              resData['stt_transcript'] ??
+              'STT 음성 변환 기록이 없습니다.',
+          'keywords': resData['keywords'] ??
+              resData['key_concepts'] ??
+              ['강의 핵심', 'AI 분석'],
           'quizzes': resData['quizzes'] ?? resData['quiz'] ?? [],
         };
 
@@ -807,7 +818,8 @@ void _showAddSubjectDialog(BuildContext context) async {
           await _fetchNotesForSubject(selectedSubjectId!);
         }
       } else {
-        _showFeedbackSnackBar('AI 분석 실패 (응답 코드: ${response.statusCode})', isError: true);
+        _showFeedbackSnackBar('AI 분석 실패 (응답 코드: ${response.statusCode})',
+            isError: true);
         setState(() {
           processStatus = '분석 실패 (응답 코드: ${response.statusCode})';
         });
@@ -830,7 +842,9 @@ void _showAddSubjectDialog(BuildContext context) async {
   void _showNoteDetailModal(Map<String, dynamic> note) {
     final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
     final String summary = note['summary'] ?? '요약 내용이 없습니다.';
-    final String transcript = note['transcript'] ?? note['stt_transcript'] ?? 'STT 음성 변환 기록이 없습니다.';
+    final String transcript = note['transcript'] ??
+        note['stt_transcript'] ??
+        'STT 음성 변환 기록이 없습니다.';
 
     List<dynamic> keywords = [];
     if (note['keywords'] is List) {
@@ -862,7 +876,8 @@ void _showAddSubjectDialog(BuildContext context) async {
             minChildSize: 0.5,
             builder: (context, scrollController) {
               return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20.0, vertical: 12.0),
                 child: Column(
                   children: [
                     Container(
@@ -876,7 +891,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                     const SizedBox(height: 12),
                     Text(
                       title,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 12),
@@ -899,17 +915,22 @@ void _showAddSubjectDialog(BuildContext context) async {
                               const SizedBox(height: 8),
                               const Text(
                                 '🔑 핵심 키워드',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.indigo),
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo),
                               ),
                               const SizedBox(height: 8),
                               keywords.isEmpty
-                                  ? const Text('추출된 키워드가 없습니다.', style: TextStyle(color: Colors.grey))
+                                  ? const Text('추출된 키워드가 없습니다.',
+                                      style: TextStyle(color: Colors.grey))
                                   : Wrap(
                                       spacing: 8.0,
                                       children: keywords.map<Widget>((kw) {
                                         return Chip(
                                           label: Text('# $kw'),
-                                          backgroundColor: Colors.indigo.shade50,
+                                          backgroundColor:
+                                              Colors.indigo.shade50,
                                           side: BorderSide.none,
                                         );
                                       }).toList(),
@@ -917,7 +938,10 @@ void _showAddSubjectDialog(BuildContext context) async {
                               const Divider(height: 28),
                               const Text(
                                 '📝 핵심 요약 노트',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.indigo),
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo),
                               ),
                               const SizedBox(height: 10),
                               Container(
@@ -925,23 +949,27 @@ void _showAddSubjectDialog(BuildContext context) async {
                                 decoration: BoxDecoration(
                                   color: Colors.grey.shade50,
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.indigo.shade100),
+                                  border: Border.all(
+                                      color: Colors.indigo.shade100),
                                 ),
                                 child: Text(
                                   summary,
-                                  style: const TextStyle(fontSize: 15, height: 1.6),
+                                  style: const TextStyle(
+                                      fontSize: 15, height: 1.6),
                                 ),
                               ),
                             ],
                           ),
                           quizzes.isEmpty
-                              ? const Center(child: Text('생성된 AI 복습 퀴즈가 없습니다.'))
+                              ? const Center(
+                                  child: Text('생성된 AI 복습 퀴즈가 없습니다.'))
                               : ListView.builder(
                                   controller: scrollController,
                                   itemCount: quizzes.length,
                                   itemBuilder: (context, qIdx) {
                                     final quiz = quizzes[qIdx];
-                                    return QuizCardWidget(quiz: quiz, index: qIdx);
+                                    return QuizCardWidget(
+                                        quiz: quiz, index: qIdx);
                                   },
                                 ),
                           ListView(
@@ -950,7 +978,10 @@ void _showAddSubjectDialog(BuildContext context) async {
                               const SizedBox(height: 8),
                               const Text(
                                 '🎙️ 음성 변환(STT) 전체 텍스트',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.indigo),
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo),
                               ),
                               const SizedBox(height: 10),
                               Container(
@@ -961,7 +992,10 @@ void _showAddSubjectDialog(BuildContext context) async {
                                 ),
                                 child: SelectableText(
                                   transcript,
-                                  style: const TextStyle(fontSize: 14, height: 1.6, color: Colors.black87),
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      height: 1.6,
+                                      color: Colors.black87),
                                 ),
                               ),
                             ],
@@ -981,7 +1015,6 @@ void _showAddSubjectDialog(BuildContext context) async {
 
   @override
   Widget build(BuildContext context) {
-
     final subjects = context.watch<SubjectProvider>().subjects;
 
     return Scaffold(
@@ -990,7 +1023,8 @@ void _showAddSubjectDialog(BuildContext context) async {
           children: [
             Icon(Icons.school, color: Colors.indigo),
             SizedBox(width: 8),
-            Text('LectureMate MVP', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('LectureMate MVP',
+                style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -1009,19 +1043,26 @@ void _showAddSubjectDialog(BuildContext context) async {
           children: [
             Card(
               elevation: 0,
-              color: serverStatus.contains('실패') || serverStatus.contains('오류')
+              color: serverStatus.contains('실패') ||
+                      serverStatus.contains('오류') ||
+                      serverStatus.contains('없습니다')
                   ? Colors.red.shade50
                   : Colors.green.shade50,
               child: ListTile(
                 leading: Icon(
-                  serverStatus.contains('실패') || serverStatus.contains('오류')
+                  serverStatus.contains('실패') ||
+                          serverStatus.contains('오류') ||
+                          serverStatus.contains('없습니다')
                       ? Icons.error_outline
                       : Icons.check_circle_outline,
-                  color: serverStatus.contains('실패') || serverStatus.contains('오류')
+                  color: serverStatus.contains('실패') ||
+                          serverStatus.contains('오류') ||
+                          serverStatus.contains('없습니다')
                       ? Colors.red
                       : Colors.green,
                 ),
-                title: const Text('백엔드 서버 상태', style: TextStyle(fontWeight: FontWeight.bold)),
+                title: const Text('백엔드 서버 상태',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(serverStatus),
               ),
             ),
@@ -1041,12 +1082,15 @@ void _showAddSubjectDialog(BuildContext context) async {
                           children: [
                             Icon(Icons.mic, color: Colors.indigo),
                             SizedBox(width: 8),
-                            Text('강의 음성 분석', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                            Text('강의 음성 분석',
+                                style: TextStyle(
+                                    fontSize: 17, fontWeight: FontWeight.bold)),
                           ],
                         ),
                         if (isRecording)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: isPaused ? Colors.orange : Colors.red,
                               borderRadius: BorderRadius.circular(12),
@@ -1054,14 +1098,20 @@ void _showAddSubjectDialog(BuildContext context) async {
                             child: Row(
                               children: [
                                 Icon(
-                                  isPaused ? Icons.pause_circle_filled : Icons.fiber_manual_record,
+                                  isPaused
+                                      ? Icons.pause_circle_filled
+                                      : Icons.fiber_manual_record,
                                   color: Colors.white,
                                   size: 12,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  isPaused ? '일시정지' : _formatDuration(_recordSeconds),
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  isPaused
+                                      ? '일시정지'
+                                      : _formatDuration(_recordSeconds),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ],
                             ),
@@ -1074,15 +1124,20 @@ void _showAddSubjectDialog(BuildContext context) async {
                       decoration: const InputDecoration(
                         labelText: '수강 과목 선택',
                         border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         fillColor: Colors.white,
                         filled: true,
                       ),
                       hint: const Text('분석할 과목을 선택하세요'),
-                      items: subjects.map<DropdownMenuItem<int>>((dynamic subject) {
+                      items:
+                          subjects.map<DropdownMenuItem<int>>((dynamic subject) {
                         final int subId = int.parse(subject['id'].toString());
-                        final String title = subject['title'] ?? subject['name'] ?? '과목';
-                        final String prof = subject['instructor'] ?? subject['professor'] ?? '교수 미지정';
+                        final String title =
+                            subject['title'] ?? subject['name'] ?? '과목';
+                        final String prof = subject['instructor'] ??
+                            subject['professor'] ??
+                            '교수 미지정';
                         return DropdownMenuItem<int>(
                           value: subId,
                           child: Text('$title ($prof)'),
@@ -1094,7 +1149,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                               if (newValue != null) {
                                 setState(() {
                                   selectedSubjectId = newValue;
-                                  processStatus = '선택한 과목 노트 목록을 동기화합니다.';
+                                  processStatus =
+                                      '선택한 과목 노트 목록을 동기화합니다.';
                                 });
                                 _fetchNotesForSubject(newValue);
                               }
@@ -1103,7 +1159,12 @@ void _showAddSubjectDialog(BuildContext context) async {
                     const SizedBox(height: 12),
                     Text(
                       processStatus,
-                      style: TextStyle(color: isRecording ? (isPaused ? Colors.orange.shade800 : Colors.red) : Colors.black87),
+                      style: TextStyle(
+                          color: isRecording
+                              ? (isPaused
+                                  ? Colors.orange.shade800
+                                  : Colors.red)
+                              : Colors.black87),
                     ),
                     const SizedBox(height: 12),
                     if (isProcessing) ...[
@@ -1120,19 +1181,25 @@ void _showAddSubjectDialog(BuildContext context) async {
                       Row(
                         children: [
                           ElevatedButton.icon(
-                            onPressed: (isRecording || selectedSubjectId == null) ? null : _uploadAudioFile,
+                            onPressed: (isRecording || selectedSubjectId == null)
+                                ? null
+                                : _uploadAudioFile,
                             icon: const Icon(Icons.upload_file),
                             label: const Text('파일 업로드'),
                           ),
                           const SizedBox(width: 10),
                           ElevatedButton.icon(
-                            onPressed: selectedSubjectId == null ? null : _toggleRecording,
+                            onPressed: selectedSubjectId == null
+                                ? null
+                                : _toggleRecording,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isRecording ? Colors.red : Colors.indigo,
+                              backgroundColor:
+                                  isRecording ? Colors.red : Colors.indigo,
                               foregroundColor: Colors.white,
                             ),
                             icon: Icon(isRecording ? Icons.stop : Icons.mic),
-                            label: Text(isRecording ? '녹음 중지 및 분석' : '실시간 음성 녹음'),
+                            label: Text(
+                                isRecording ? '녹음 중지 및 분석' : '실시간 음성 녹음'),
                           ),
                           if (isRecording) ...[
                             const SizedBox(width: 10),
@@ -1142,7 +1209,8 @@ void _showAddSubjectDialog(BuildContext context) async {
                                 foregroundColor: Colors.orange.shade800,
                                 side: BorderSide(color: Colors.orange.shade800),
                               ),
-                              icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+                              icon: Icon(
+                                  isPaused ? Icons.play_arrow : Icons.pause),
                               label: Text(isPaused ? '다시 시작' : '일시정지'),
                             ),
                           ],
@@ -1158,16 +1226,19 @@ void _showAddSubjectDialog(BuildContext context) async {
               Card(
                 color: Colors.indigo.shade600,
                 child: ListTile(
-                  leading: const Icon(Icons.auto_awesome, color: Colors.white, size: 30),
+                  leading: const Icon(Icons.auto_awesome,
+                      color: Colors.white, size: 30),
                   title: const Text(
                     '✨ 방금 생성된 AI 노트 바로보기',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                   subtitle: const Text(
                     '클릭하여 핵심 요약, 퀴즈, STT 원문 확인',
                     style: TextStyle(color: Colors.white70),
                   ),
-                  trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white),
+                  trailing:
+                      const Icon(Icons.arrow_forward_ios, color: Colors.white),
                   onTap: () => _showNoteDetailModal(latestNoteData!),
                 ),
               ),
@@ -1177,7 +1248,9 @@ void _showAddSubjectDialog(BuildContext context) async {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('📚 과목 저장 노트', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('📚 과목 저장 노트',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 20),
                     onPressed: () => _fetchNotesForSubject(selectedSubjectId!),
@@ -1195,49 +1268,57 @@ void _showAddSubjectDialog(BuildContext context) async {
                   ),
                 )
               else
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: lectureNotes.length,
-                itemBuilder: (context, index) {
-                  final note = Map<String, dynamic>.from(lectureNotes[index]);
-                  final int noteId = int.parse((note['id'] ?? note['lecture_id']).toString());
-                  final String noteTitle = note['title'] ?? note['filename'] ?? '강의 노트 ${index + 1}';
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: lectureNotes.length,
+                  itemBuilder: (context, index) {
+                    final note = Map<String, dynamic>.from(lectureNotes[index]);
+                    final int noteId = int.parse(
+                        (note['id'] ?? note['lecture_id']).toString());
+                    final String noteTitle = note['title'] ??
+                        note['filename'] ??
+                        '강의 노트 ${index + 1}';
 
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.article, color: Colors.indigo),
-                      title: Text(noteTitle),
-                      subtitle: Text(note['created_at'] ?? '저장됨'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // ✏️ 노트 제목 수정 버튼
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined, color: Colors.indigo, size: 20),
-                            tooltip: '노트 제목 수정',
-                            onPressed: () => _showEditTitleDialog(noteId, noteTitle),
-                          ),
-                          // 🗑️ [신규 추가] 노트 삭제 버튼
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                            tooltip: '노트 삭제',
-                            onPressed: () => _confirmDeleteNote(noteId, noteTitle),
-                          ),
-                          const Icon(Icons.chevron_right),
-                        ],
+                    return Card(
+                      child: ListTile(
+                        leading:
+                            const Icon(Icons.article, color: Colors.indigo),
+                        title: Text(noteTitle),
+                        subtitle: Text(note['created_at'] ?? '저장됨'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined,
+                                  color: Colors.indigo, size: 20),
+                              tooltip: '노트 제목 수정',
+                              onPressed: () =>
+                                  _showEditTitleDialog(noteId, noteTitle),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.redAccent, size: 20),
+                              tooltip: '노트 삭제',
+                              onPressed: () =>
+                                  _confirmDeleteNote(noteId, noteTitle),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                        onTap: () => _showNoteDetailModal(note),
                       ),
-                      onTap: () => _showNoteDetailModal(note),
-                    ),
-                  );
-                },
-              ),
+                    );
+                  },
+                ),
               const SizedBox(height: 20),
             ],
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('🗓️ 내 수강 과목 목록', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('🗓️ 내 수강 과목 목록',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ElevatedButton.icon(
                   onPressed: () => _showAddSubjectDialog(context),
                   icon: const Icon(Icons.add, size: 18),
@@ -1245,14 +1326,16 @@ void _showAddSubjectDialog(BuildContext context) async {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             subjects.isEmpty
-                ? const Center(child: Text('등록된 과목이 없습니다. 과목 추가 버튼을 눌러보세요!'))
+                ? const Center(
+                    child: Text('등록된 과목이 없습니다. 과목 추가 버튼을 눌러보세요!'))
                 : ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -1260,9 +1343,14 @@ void _showAddSubjectDialog(BuildContext context) async {
                     itemBuilder: (context, index) {
                       final subject = subjects[index];
                       final int subId = int.parse(subject['id'].toString());
-                      final String title = subject['title'] ?? subject['name'] ?? '과목명';
-                      final String prof = subject['instructor'] ?? subject['professor'] ?? '교수 미지정';
-                      final String time = subject['time_slot'] ?? subject['time'] ?? '시간 미정';
+                      final String title =
+                          subject['title'] ?? subject['name'] ?? '과목명';
+                      final String prof = subject['instructor'] ??
+                          subject['professor'] ??
+                          '교수 미지정';
+                      final String time = subject['time_slot'] ??
+                          subject['time'] ??
+                          '시간 미정';
 
                       bool isSelected = selectedSubjectId == subId;
 
@@ -1270,16 +1358,20 @@ void _showAddSubjectDialog(BuildContext context) async {
                         color: isSelected ? Colors.indigo.shade50 : null,
                         shape: isSelected
                             ? RoundedRectangleBorder(
-                                side: const BorderSide(color: Colors.indigo, width: 1.5),
+                                side: const BorderSide(
+                                    color: Colors.indigo, width: 1.5),
                                 borderRadius: BorderRadius.circular(12),
                               )
                             : null,
                         child: ListTile(
-                          leading: Icon(Icons.book, color: isSelected ? Colors.indigo : Colors.grey),
+                          leading: Icon(Icons.book,
+                              color: isSelected ? Colors.indigo : Colors.grey),
                           title: Text(
                             title,
                             style: TextStyle(
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
                             ),
                           ),
                           subtitle: Text('$prof | ⏰ $time'),
@@ -1290,18 +1382,24 @@ void _showAddSubjectDialog(BuildContext context) async {
                                 const Padding(
                                   padding: EdgeInsets.only(right: 8.0),
                                   child: Chip(
-                                    label: Text('선택됨', style: TextStyle(fontSize: 11, color: Colors.indigo)),
+                                    label: Text('선택됨',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.indigo)),
                                     backgroundColor: Colors.white,
                                     side: BorderSide(color: Colors.indigo),
                                   ),
                                 ),
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined, color: Colors.indigo, size: 20),
+                                icon: const Icon(Icons.edit_outlined,
+                                    color: Colors.indigo, size: 20),
                                 tooltip: '과목 수정',
-                                onPressed: () => _showEditSubjectDialog(subject),
+                                onPressed: () =>
+                                    _showEditSubjectDialog(subject),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                                icon: const Icon(Icons.delete_outline,
+                                    color: Colors.redAccent, size: 20),
                                 tooltip: '과목 삭제',
                                 onPressed: () => _deleteSubject(subId, title),
                               ),
@@ -1325,7 +1423,9 @@ void _showAddSubjectDialog(BuildContext context) async {
   }
 }
 
-// 퀴즈 전용 위젯
+// ---------------------------------------------------------------------------
+// 🧩 퀴즈 전용 위젯
+// ---------------------------------------------------------------------------
 class QuizCardWidget extends StatefulWidget {
   final dynamic quiz;
   final int index;
@@ -1341,9 +1441,12 @@ class _QuizCardWidgetState extends State<QuizCardWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final options = (widget.quiz['options'] ?? widget.quiz['choices'] ?? []) as List<dynamic>;
-    final int correctAnswer = widget.quiz['answer'] ?? widget.quiz['correctIndex'] ?? 0;
-    final String explanation = widget.quiz['explanation'] ?? '핵심 요약 내용을 참고하세요.';
+    final options =
+        (widget.quiz['options'] ?? widget.quiz['choices'] ?? []) as List<dynamic>;
+    final int correctAnswer =
+        widget.quiz['answer'] ?? widget.quiz['correctIndex'] ?? 0;
+    final String explanation =
+        widget.quiz['explanation'] ?? '핵심 요약 내용을 참고하세요.';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1385,7 +1488,9 @@ class _QuizCardWidgetState extends State<QuizCardWidget> {
                   leading: Icon(
                     selectedOption != null && isCorrect
                         ? Icons.check_circle
-                        : (isSelected ? Icons.cancel : Icons.radio_button_unchecked),
+                        : (isSelected
+                            ? Icons.cancel
+                            : Icons.radio_button_unchecked),
                     color: selectedOption != null && isCorrect
                         ? Colors.green
                         : (isSelected ? Colors.red : Colors.grey),

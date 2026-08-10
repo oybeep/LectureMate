@@ -28,7 +28,7 @@ class RecordingScreen extends StatefulWidget {
 class _RecordingScreenState extends State<RecordingScreen> {
   final List<ChatMessage> _messages = [
     ChatMessage(
-      text: "안녕하세요! 질문하실 내용을 입력하시면 저장된 강의 노트 및 STT 기록에서 타임스탬프와 함께 답변해 드립니다.",
+      text: "안녕하세요! 질문하실 내용을 입력하시면 저장된 강의 노트 및 STT 기록을 통해 답변해 드립니다.",
       isUser: false,
     )
   ];

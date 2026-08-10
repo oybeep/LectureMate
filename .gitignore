@@ -7,3 +7,9 @@ backend/__pycache__/
 frontend/.dart_tool/
 frontend/.idea/
 frontend/build/
+
+# 백엔드 환경변수 및 DB
+backend/.env
+**/chroma_db/
+*.sqlite3
+.venv/
