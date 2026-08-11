@@ -370,10 +370,14 @@ async def handle_audio_upload_universal(
                 parsed_data = {}
 
         summary_text = parsed_data.get("summary", "강의 요약 내용을 성공적으로 생성했습니다.")
+        
+        # ✨ [추가] 세부 강의 내용 파싱
+        detailed_summary_list = parsed_data.get("detailed_summary") or parsed_data.get("detail_summary") or parsed_data.get("details") or []
+        
         keywords = parsed_data.get("key_concepts") or parsed_data.get("keywords") or ["강의 핵심", "AI 요약"]
         raw_quizzes = parsed_data.get("quiz_questions") or parsed_data.get("quiz") or parsed_data.get("quizzes") or []
 
-# 퀴즈 데이터 포맷팅 (summary.py의 새 JSON 구조 완벽 대응)
+        # 퀴즈 데이터 포맷팅
         formatted_quizzes = []
         if isinstance(raw_quizzes, list):
             for idx, item in enumerate(raw_quizzes):
@@ -381,14 +385,12 @@ async def handle_audio_upload_universal(
                     q_text = item.get("question", "강의 관련 퀴즈")
                     raw_opts = item.get("options") or item.get("choices") or []
                     
-                    # LLM이 생성한 보기 4개가 정상 존재할 경우 사용
                     if isinstance(raw_opts, list) and len(raw_opts) >= 2:
                         opts = [str(o) for o in raw_opts]
                     else:
                         a_text = str(item.get("answer", "정답"))
                         opts = [a_text, "해당하지 않는 내용", "잘못된 개념 설명", "언급되지 않은 조건"]
 
-                    # 정답 인덱스 파싱 (answer_index 숫자가 반환되면 최우선 사용)
                     correct_idx = item.get("answer_index")
                     if correct_idx is None or not isinstance(correct_idx, int):
                         a_text = str(item.get("answer", ""))
@@ -428,6 +430,10 @@ async def handle_audio_upload_universal(
             "stt_transcript": stt_transcript,
             "stt_text": stt_transcript,
             "summary": summary_text,
+            # ✨ [추가] 세부 강의 내용 응답 객체 포함
+            "detailed_summary": detailed_summary_list,
+            "detail_summary": detailed_summary_list,
+            "details": detailed_summary_list,
             "keywords": keywords,
             "key_concepts": keywords,
             "quiz": formatted_quizzes,
@@ -440,7 +446,7 @@ async def handle_audio_upload_universal(
             LECTURES_DB[target_sub_id] = []
         LECTURES_DB[target_sub_id].insert(0, payload_data)
 
-        # 6. 완성된 요약 텍스트 및 STT 데이터를 포함하여 Vector DB 저장
+        # 6. Vector DB 저장
         try:
             chunks_stored = await asyncio.to_thread(
                 embedder.process_and_store_lecture,
