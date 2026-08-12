@@ -646,11 +646,29 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // 기존에 DB에 저장된 정제본이 있다면 우선 활용
+    // 💡 DB에 저장되어 있던 정제본 및 맞춤노트 불러오기
     _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
+    _generatedCustomContent = widget.noteData['custom_note'] ?? widget.noteData['custom_content'];
   }
 
-  // 1. STT 가독성 정제본 요청
+  // 💡 백엔드 DB에 업데이트 사항을 영구 저장하는 헬퍼 함수
+  Future<void> _updateLectureInDb(Map<String, dynamic> updateFields) async {
+    final noteId = int.tryParse((widget.noteData['id'] ?? widget.noteData['lecture_id']).toString()) ?? 0;
+    if (noteId == 0) return;
+
+    try {
+      final baseUrl = ApiConfig.baseUrl;
+      await http.patch(
+        Uri.parse('$baseUrl/lectures/$noteId'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(updateFields),
+      );
+    } catch (e) {
+      debugPrint('DB 자동 저장 실패: $e');
+    }
+  }
+
+  // 1. STT 가독성 정제본 요청 및 DB 자동 저장
   Future<void> _fetchCleanedSTT() async {
     final rawStt = widget.noteData['stt_text'] ??
         widget.noteData['transcript'] ??
@@ -671,9 +689,16 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final cleaned = data['cleaned_text'] as String?;
+        
         setState(() {
-          _cleanedTranscript = data['cleaned_text'];
+          _cleanedTranscript = cleaned;
         });
+
+        // 💡 화면 객체 및 DB에 동시 저장하여 영구 유지
+        widget.noteData['cleaned_transcript'] = cleaned;
+        await _updateLectureInDb({'cleaned_transcript': cleaned});
+
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -694,7 +719,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-  // 2. 5대 맞춤 노트 생성 요청
+  // 2. 5대 맞춤 노트 생성 요청 및 DB 자동 저장
   Future<void> _fetchCustomFormat(String formatType) async {
     setState(() {
       _selectedFormat = formatType;
@@ -719,9 +744,16 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final content = data['content'] as String?;
+
         setState(() {
-          _generatedCustomContent = data['content'];
+          _generatedCustomContent = content;
         });
+
+        // 💡 화면 객체 및 DB에 동시 저장하여 영구 유지
+        widget.noteData['custom_note'] = content;
+        await _updateLectureInDb({'custom_note': content});
+
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -783,20 +815,44 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
   String _formatDetailedSummary(dynamic detailedData) {
     if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
-    if (detailedData is String && detailedData.trim().isNotEmpty) {
-      return detailedData;
+
+    if (detailedData is String) {
+      final trimmed = detailedData.trim();
+      return trimmed.isNotEmpty ? trimmed : '세부 강의 노트 내용이 없습니다.';
     }
+
     if (detailedData is List) {
       if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
-      return detailedData.map((item) {
+
+      final buffer = StringBuffer();
+
+      for (var item in detailedData) {
         if (item is Map) {
-          final title = item['topic'] ?? item['title'] ?? '주요 내용';
-          final desc = item['content'] ?? item['description'] ?? '';
-          return '### 📌 $title\n$desc\n';
+          final title = item['title'] ?? item['topic'] ?? item['header'] ?? '주요 소주제';
+          buffer.writeln('### 📌 $title\n');
+
+          if (item['points'] != null && item['points'] is List) {
+            final List points = item['points'];
+            for (var pt in points) {
+              buffer.writeln('• ${pt.toString()}');
+            }
+            buffer.writeln('');
+          } else if (item['content'] != null || item['description'] != null) {
+            final content = item['content'] ?? item['description'] ?? '';
+            buffer.writeln('$content\n');
+          } else {
+            buffer.writeln('*상세 설명이 제공되지 않았습니다.*\n');
+          }
+
+          buffer.writeln('---\n');
+        } else if (item is String) {
+          buffer.writeln('• $item\n');
         }
-        return '- $item';
-      }).join('\n\n');
+      }
+
+      return buffer.toString().trim();
     }
+
     return detailedData.toString();
   }
 
@@ -842,7 +898,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
             // ==========================================
             Column(
               children: [
-                // 정제본 / 원문 선택 세그먼트 버튼
                 SegmentedButton<int>(
                   segments: const [
                     ButtonSegment(
@@ -861,7 +916,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                     setState(() {
                       _sttViewMode = newSelection.first;
                     });
-                    // 정제본 탭 선택 시 데이터가 없으면 자동 호출
                     if (_sttViewMode == 0 && _cleanedTranscript == null && !_isLoadingCleanSTT) {
                       _fetchCleanedSTT();
                     }
@@ -879,7 +933,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: _sttViewMode == 1
-                          // 원문 그대로
                           ? SingleChildScrollView(
                               child: SelectableText(
                                 sttRawText,
@@ -887,7 +940,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                                     fontSize: 15, height: 1.7, color: Colors.black87),
                               ),
                             )
-                          // 가독성 정제본
                           : _isLoadingCleanSTT
                               ? const Center(
                                   child: Column(
