@@ -491,6 +491,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+// ---------------------------------------------------------------------------
+  // ✨ 과목 추가 다이얼로그
+  // ---------------------------------------------------------------------------
   void _showAddSubjectDialog(BuildContext context) async {
     final titleController = TextEditingController();
     final professorController = TextEditingController();
@@ -550,7 +553,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () {
                     final subName = titleController.text.trim();
                     final profName = professorController.text.trim();
-                    if (subName.isEmpty) return;
+                    if (subName.isEmpty) {
+                      _showFeedbackSnackBar('과목명을 입력해 주세요.', isError: true);
+                      return;
+                    }
+
+                    // ✨ [검증] 시간 역전 및 중복 체크
+                    final errorMsg = _validateSchedules(schedules);
+                    if (errorMsg != null) {
+                      _showFeedbackSnackBar(errorMsg, isError: true);
+                      return; // 팝업 유지 & 등록 차단
+                    }
 
                     final finalTimeSlot =
                         schedules.map((s) => s.toSlotString()).join(', ');
@@ -579,22 +592,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showEditSubjectDialog(Map<String, dynamic> subject) async {
-    final titleController =
-        TextEditingController(text: subject['title'] ?? subject['name'] ?? '');
+  // ---------------------------------------------------------------------------
+  // ✏️ 과목 수정 다이얼로그
+  // ---------------------------------------------------------------------------
+  void _showEditSubjectDialog(dynamic subject) async {
+    final int subId = int.parse(subject['id'].toString());
+    final titleController = TextEditingController(
+        text: subject['title'] ?? subject['name'] ?? '');
     final professorController = TextEditingController(
         text: subject['instructor'] ?? subject['professor'] ?? '');
 
-    List<CourseScheduleItem> schedules = [];
-    final String rawTimeSlot =
-        subject['time_slot'] ?? subject['time'] ?? subject['schedule'] ?? '';
-
-    if (rawTimeSlot.isNotEmpty) {
-      final slotParts = rawTimeSlot.split(', ');
-      for (var slot in slotParts) {
-        schedules.add(CourseScheduleItem.fromSlotString(slot));
-      }
-    }
+    String existingSlot =
+        subject['time_slot'] ?? subject['time'] ?? '월 09:00~10:30';
+    List<String> slotStrings = existingSlot.split(', ');
+    List<CourseScheduleItem> schedules =
+        slotStrings.map((s) => CourseScheduleItem.fromSlotString(s)).toList();
 
     if (schedules.isEmpty) {
       schedules.add(CourseScheduleItem(
@@ -610,7 +622,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('✏️ 수강 과목 수정',
+              title: const Text('✏️ 과목 정보 수정',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               content: SizedBox(
                 width: 450,
@@ -649,7 +661,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () {
                     final subName = titleController.text.trim();
                     final profName = professorController.text.trim();
-                    if (subName.isEmpty) return;
+                    if (subName.isEmpty) {
+                      _showFeedbackSnackBar('과목명을 입력해 주세요.', isError: true);
+                      return;
+                    }
+
+                    // ✨ [검증] 본인 과목 ID를 넘겨 자기 자신과의 중복은 제외하고 체크
+                    final errorMsg = _validateSchedules(schedules, currentEditingSubjectId: subId);
+                    if (errorMsg != null) {
+                      _showFeedbackSnackBar(errorMsg, isError: true);
+                      return; // 팝업 유지 & 수정 차단
+                    }
 
                     final finalTimeSlot =
                         schedules.map((s) => s.toSlotString()).join(', ');
@@ -660,7 +682,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       'time_slot': finalTimeSlot,
                     });
                   },
-                  child: const Text('수정'),
+                  child: const Text('수정 저장'),
                 ),
               ],
             );
@@ -670,7 +692,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result != null) {
-      final int subId = int.parse(subject['id'].toString());
       await _updateSubject(
         subId,
         result['title'] ?? '',
@@ -680,158 +701,155 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+// ===========================================================================
+// 🕒 [여기서부터 복사] 시간 검증 헬퍼 함수들을 바로 여기에 넣으세요!
+// ===========================================================================
+  int _timeOfDayToMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
+
+  int _stringTimeToMinutes(String timeStr) {
+    final parts = timeStr.trim().split(':');
+    if (parts.length < 2) return 0;
+    return (int.tryParse(parts[0]) ?? 0) * 60 + (int.tryParse(parts[1]) ?? 0);
+  }
+
+  String? _validateSchedules(List<CourseScheduleItem> schedules, {int? currentEditingSubjectId}) {
+    // 1️⃣ 시작/종료 시간 역전 검사 (2번 요구사항)
+    for (int i = 0; i < schedules.length; i++) {
+      final item = schedules[i];
+      final startMin = _timeOfDayToMinutes(item.startTime);
+      final endMin = _timeOfDayToMinutes(item.endTime);
+
+      if (startMin >= endMin) {
+        return '${item.day}요일 일정의 종료 시간이 시작 시간보다 같거나 빠릅니다.';
+      }
+    }
+
+    // 2️⃣ 한 과목 내에서 추가한 여러 일정 간의 중복 검사
+    for (int i = 0; i < schedules.length; i++) {
+      for (int j = i + 1; j < schedules.length; j++) {
+        if (schedules[i].day == schedules[j].day) {
+          final s1 = _timeOfDayToMinutes(schedules[i].startTime);
+          final e1 = _timeOfDayToMinutes(schedules[i].endTime);
+          final s2 = _timeOfDayToMinutes(schedules[j].startTime);
+          final e2 = _timeOfDayToMinutes(schedules[j].endTime);
+
+          if (s1 < e2 && e1 > s2) {
+            return '입력하신 일정 중 ${schedules[i].day}요일 시간이 서로 겹칩니다.';
+          }
+        }
+      }
+    }
+
+    // 3️⃣ 기존 등록된 다른 과목들과의 중복 검사 (1번 요구사항)
+    final currentSubjects = context.read<SubjectProvider>().subjects;
+    for (final newSch in schedules) {
+      final newStart = _timeOfDayToMinutes(newSch.startTime);
+      final newEnd = _timeOfDayToMinutes(newSch.endTime);
+
+      for (final sub in currentSubjects) {
+        final int subId = int.tryParse(sub['id']?.toString() ?? '') ?? 0;
+        if (currentEditingSubjectId != null && subId == currentEditingSubjectId) {
+          continue; // 수정 중인 과목 자신은 비교에서 제외
+        }
+
+        final String existingSlotStr = sub['time_slot'] ?? sub['time'] ?? '';
+        final slots = existingSlotStr.split(', ');
+
+        for (final slot in slots) {
+          final match = RegExp(r'([월화수목금토일])\s*(\d{2}:\d{2})~(\d{2}:\d{2})').firstMatch(slot.trim());
+          if (match != null) {
+            final existDay = match.group(1);
+            final existStart = _stringTimeToMinutes(match.group(2)!);
+            final existEnd = _stringTimeToMinutes(match.group(3)!);
+
+            if (existDay == newSch.day) {
+              if (newStart < existEnd && newEnd > existStart) {
+                final subName = sub['title'] ?? sub['name'] ?? '다른 과목';
+                return '해당 시간에 이미 수업이 등록되어 있습니다.\n($subName: $existDay ${match.group(2)}~${match.group(3)})';
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+// ---------------------------------------------------------------------------
+  // 🎙️ 음성 파일 업로드 및 녹음 제어 메서드
+  // ---------------------------------------------------------------------------
   Future<void> _uploadAudioFile() async {
     if (selectedSubjectId == null) {
-      _showFeedbackSnackBar('먼저 수강 과목을 선택해 주세요.', isError: true);
+      _showFeedbackSnackBar('과목을 먼저 선택해 주세요.', isError: true);
       return;
     }
 
-FilePickerResult? result = await FilePicker.pickFiles(
-  type: FileType.custom,
-  allowedExtensions: ['mp3', 'wav', 'm4a', 'mp4'],
-  withData: true,
-);
+    // FilePicker 호출 (platform 속성 없이 FilePicker.pickFiles 호출)
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['mp3', 'm4a', 'wav', 'aac', 'flac'],
+      withData: true, // Web 지원을 위해 바이트 데이터 로드
+    );
 
-    if (result != null && result.files.single.bytes != null) {
-      _processAudioPipeline(
-          result.files.single.bytes!, result.files.single.name);
-    }
-  }
+    if (result != null && result.files.isNotEmpty) {
+      final file = result.files.first;
+      final fileName = file.name;
 
-  // 🎙️ 녹음 시작 및 완전 중지
-  Future<void> _toggleRecording() async {
-    if (selectedSubjectId == null) {
-      _showFeedbackSnackBar('먼저 수강 과목을 선택해 주세요.', isError: true);
-      return;
-    }
+      setState(() {
+        isProcessing = true;
+        processStatus = '음성 파일 전송 중...';
+      });
 
-    try {
-      if (isRecording) {
-        _stopTimer();
-        final path = await _audioRecorder.stop();
+      try {
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse('$baseUrl/lectures/upload'),
+        );
+        request.fields['subject_id'] = selectedSubjectId.toString();
+        request.fields['title'] = fileName;
 
-        setState(() {
-          isRecording = false;
-          isPaused = false;
-          processStatus = '녹음 완료! 백엔드 AI 분석 요청 중...';
-        });
-
-        if (path != null) {
-          final response = await http.get(Uri.parse(path));
-          await _processAudioPipeline(
-              response.bodyBytes,
-              'lecture_recorded_${DateTime.now().millisecondsSinceEpoch}.m4a');
-        }
-      } else {
-        if (await _audioRecorder.hasPermission()) {
-          await _audioRecorder.start(
-            const RecordConfig(encoder: AudioEncoder.aacLc),
-            path: '',
+        // Web 환경과 Mobile/Desktop 환경 분기 처리
+        if (file.bytes != null) {
+          // Web (Chrome) 환경: Byte 데이터 사용
+          request.files.add(
+            http.MultipartFile.fromBytes(
+              'file',
+              file.bytes!,
+              filename: fileName,
+            ),
           );
-          _startTimer();
+        } else if (file.path != null) {
+          // Mobile/Desktop 환경: Path 사용
+          request.files.add(
+            await http.MultipartFile.fromPath('file', file.path!),
+          );
+        }
+
+        final streamedResponse = await request.send();
+        final response = await http.Response.fromStream(streamedResponse);
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          final resData = jsonDecode(utf8.decode(response.bodyBytes));
           setState(() {
-            isRecording = true;
-            isPaused = false;
-            processStatus = '🎙️ 실시간 강의 녹음 진행 중...';
+            latestNoteData = resData;
+            processStatus = '✨ AI 노트 생성 완료!';
           });
+          _showFeedbackSnackBar('✨ AI 노트 생성이 완료되었습니다!');
+          _fetchNotesForSubject(selectedSubjectId!);
         } else {
-          _showFeedbackSnackBar('마이크 접근 권한이 필요합니다.', isError: true);
+          setState(() {
+            processStatus = '노트 생성 실패 (${response.statusCode})';
+          });
+          _showFeedbackSnackBar('파일 업로드 실패 (${response.statusCode})',
+              isError: true);
         }
-      }
-    } catch (e) {
-      _stopTimer();
-      _showFeedbackSnackBar('녹음 중 에러가 발생했습니다: $e', isError: true);
-      setState(() {
-        isRecording = false;
-        isPaused = false;
-      });
-    }
-  }
-
-  // ⏸️ 녹음 일시정지 / 다시 시작 토글
-  Future<void> _togglePauseRecording() async {
-    if (!isRecording) return;
-
-    try {
-      if (isPaused) {
-        await _audioRecorder.resume();
+      } catch (e) {
         setState(() {
-          isPaused = false;
-          processStatus = '🎙️ 실시간 강의 녹음 진행 중...';
+          processStatus = '오류 발생: $e';
         });
-      } else {
-        await _audioRecorder.pause();
-        setState(() {
-          isPaused = true;
-          processStatus = '⏸️ 녹음 일시정지됨';
-        });
-      }
-    } catch (e) {
-      _showFeedbackSnackBar('녹음 일시정지 제어 에러: $e', isError: true);
-    }
-  }
-
-  Future<void> _processAudioPipeline(List<int> bytes, String fileName) async {
-    setState(() {
-      isProcessing = true;
-      latestNoteData = null;
-      processStatus = '서버 전송 및 STT / AI 요약 / 퀴즈 생성 진행 중...';
-    });
-
-    try {
-      var request =
-          http.MultipartRequest('POST', Uri.parse('$baseUrl/lectures/upload'));
-      request.fields['subject_id'] = selectedSubjectId.toString();
-      request.files.add(
-          http.MultipartFile.fromBytes('file', bytes, filename: fileName));
-
-      var streamedResponse =
-          await request.send().timeout(const Duration(minutes: 10));
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        var resData = jsonDecode(utf8.decode(response.bodyBytes));
-
-        final createdNote = {
-          'id': resData['id'] ?? resData['lecture_id'],
-          'title': resData['title'] ?? fileName,
-          'summary': resData['summary'] ?? resData['message'] ?? '요약 결과가 없습니다.',
-          'transcript': resData['transcript'] ??
-              resData['stt_transcript'] ??
-              'STT 음성 변환 기록이 없습니다.',
-          'keywords': resData['keywords'] ??
-              resData['key_concepts'] ??
-              ['강의 핵심', 'AI 분석'],
-          'quizzes': resData['quizzes'] ?? resData['quiz'] ?? [],
-        };
-
-        setState(() {
-          processStatus = '✨ AI 요약 및 퀴즈 생성 완료!';
-          latestNoteData = createdNote;
-        });
-
-        _showFeedbackSnackBar('✨ 새로운 AI 요약 노트와 퀴즈가 생성되었습니다!');
-
-        if (selectedSubjectId != null) {
-          await _fetchNotesForSubject(selectedSubjectId!);
-        }
-      } else {
-        _showFeedbackSnackBar('AI 분석 실패 (응답 코드: ${response.statusCode})',
-            isError: true);
-        setState(() {
-          processStatus = '분석 실패 (응답 코드: ${response.statusCode})';
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
-      _showFeedbackSnackBar('AI 분석 중 통신 오류가 발생했습니다.', isError: true);
-      setState(() {
-        processStatus = '분석 에러 발생: $e';
-      });
-    } finally {
-      if (mounted) {
+        _showFeedbackSnackBar('네트워크 오류: $e', isError: true);
+      } finally {
         setState(() {
           isProcessing = false;
         });
@@ -839,6 +857,101 @@ FilePickerResult? result = await FilePicker.pickFiles(
     }
   }
 
+  Future<void> _toggleRecording() async {
+    if (selectedSubjectId == null) {
+      _showFeedbackSnackBar('녹음할 과목을 먼저 선택해 주세요.', isError: true);
+      return;
+    }
+
+    if (isRecording) {
+      // 녹음 중지
+      _stopTimer();
+      final path = await _audioRecorder.stop();
+      setState(() {
+        isRecording = false;
+        isPaused = false;
+      });
+
+      if (path != null) {
+        // 녹음 파일 백엔드 전송
+        setState(() {
+          isProcessing = true;
+          processStatus = '녹음 파일 분석 중...';
+        });
+
+        try {
+          final request = http.MultipartRequest(
+            'POST',
+            Uri.parse('$baseUrl/lectures/upload'),
+          );
+          request.fields['subject_id'] = selectedSubjectId.toString();
+          request.fields['title'] =
+              '실시간 녹음 ${DateTime.now().toString().substring(0, 16)}';
+          request.files.add(await http.MultipartFile.fromPath('file', path));
+
+          final streamedResponse = await request.send();
+          final response = await http.Response.fromStream(streamedResponse);
+
+          if (response.statusCode == 200 || response.statusCode == 201) {
+            final resData = jsonDecode(utf8.decode(response.bodyBytes));
+            setState(() {
+              latestNoteData = resData;
+              processStatus = '✨ AI 노트 생성 완료!';
+            });
+            _showFeedbackSnackBar('✨ 녹음본 AI 노트 생성이 완료되었습니다!');
+            _fetchNotesForSubject(selectedSubjectId!);
+          } else {
+            _showFeedbackSnackBar('녹음 분석 실패 (${response.statusCode})',
+                isError: true);
+          }
+        } catch (e) {
+          _showFeedbackSnackBar('녹음 처리 중 오류: $e', isError: true);
+        } finally {
+          setState(() {
+            isProcessing = false;
+          });
+        }
+      }
+    } else {
+      // 녹음 시작
+      if (await _audioRecorder.hasPermission()) {
+        await _audioRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.aacLc),
+          path: '',
+        );
+        setState(() {
+          isRecording = true;
+          isPaused = false;
+          processStatus = '🎙️ 실시간 강의 음성 녹음 중...';
+        });
+        _startTimer();
+      } else {
+        _showFeedbackSnackBar('마이크 접근 권한이 필요합니다.', isError: true);
+      }
+    }
+  }
+
+  void _togglePauseRecording() async {
+    if (!isRecording) return;
+
+    if (isPaused) {
+      await _audioRecorder.resume();
+      setState(() {
+        isPaused = false;
+        processStatus = '🎙️ 실시간 강의 음성 녹음 중...';
+      });
+    } else {
+      await _audioRecorder.pause();
+      setState(() {
+        isPaused = true;
+        processStatus = '⏸️ 녹음이 일시정지되었습니다.';
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 📑 AI 상세 요약 모달 (📌 세부 강의 내용 포함)
+  // ---------------------------------------------------------------------------
   void _showNoteDetailModal(Map<String, dynamic> note) {
     final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
     final String summary = note['summary'] ?? '요약 내용이 없습니다.';
@@ -853,11 +966,16 @@ FilePickerResult? result = await FilePicker.pickFiles(
       keywords = note['key_concepts'];
     }
 
-    List<dynamic> quizzes = [];
-    if (note['quizzes'] is List) {
-      quizzes = note['quizzes'];
-    } else if (note['quiz'] is List) {
-      quizzes = note['quiz'];
+    // 세부 요약 항목 추출 (백엔드 필드명 호환성 강화)
+    List<dynamic> detailedSummary = [];
+    if (note['detailed_summary'] is List) {
+      detailedSummary = note['detailed_summary'];
+    } else if (note['detail_summary'] is List) {
+      detailedSummary = note['detail_summary'];
+    } else if (note['details'] is List) {
+      detailedSummary = note['details'];
+    } else if (note['bullet_points'] is List) {
+      detailedSummary = note['bullet_points'];
     }
 
     showModalBottomSheet(
@@ -868,7 +986,7 @@ FilePickerResult? result = await FilePicker.pickFiles(
       ),
       builder: (context) {
         return DefaultTabController(
-          length: 3,
+          length: 2,
           child: DraggableScrollableSheet(
             expand: false,
             initialChildSize: 0.85,
@@ -901,7 +1019,6 @@ FilePickerResult? result = await FilePicker.pickFiles(
                       indicatorColor: Colors.indigo,
                       tabs: [
                         Tab(icon: Icon(Icons.auto_awesome), text: "AI 요약"),
-                        Tab(icon: Icon(Icons.quiz), text: "복습 퀴즈"),
                         Tab(icon: Icon(Icons.subtitles), text: "STT 원문"),
                       ],
                     ),
@@ -909,6 +1026,7 @@ FilePickerResult? result = await FilePicker.pickFiles(
                     Expanded(
                       child: TabBarView(
                         children: [
+                          // 1️⃣ AI 요약 탭
                           ListView(
                             controller: scrollController,
                             children: [
@@ -958,20 +1076,145 @@ FilePickerResult? result = await FilePicker.pickFiles(
                                       fontSize: 15, height: 1.6),
                                 ),
                               ),
+                              const Divider(height: 28),
+                              const Text(
+                                '📌 세부 강의 내용',
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo),
+                              ),
+                              const SizedBox(height: 10),
+                              detailedSummary.isEmpty
+                                  ? Container(
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade50,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Text(
+                                        '세부 강의 내용이 없습니다.',
+                                        style: TextStyle(color: Colors.grey),
+                                      ),
+                                    )
+                                  : Column(
+                                      children: detailedSummary.asMap().entries.map<Widget>((entry) {
+                                        final int index = entry.key + 1;
+                                        final item = entry.value;
+
+                                        // 1️⃣ Map 형태 (title + points/subpoints 구조)
+                                        if (item is Map) {
+                                          final String subTitle = item['title'] ?? item['topic'] ?? '주제 $index';
+                                          List<dynamic> points = [];
+                                          if (item['points'] is List) {
+                                            points = item['points'];
+                                          } else if (item['descriptions'] is List) {
+                                            points = item['descriptions'];
+                                          } else if (item['explanation'] != null) {
+                                            points = [item['explanation'].toString()];
+                                          }
+
+                                          return Container(
+                                            margin: const EdgeInsets.only(bottom: 12),
+                                            padding: const EdgeInsets.all(14),
+                                            decoration: BoxDecoration(
+                                              color: Colors.indigo.shade50.withOpacity(0.4),
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: Colors.indigo.shade100),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.check_circle_rounded,
+                                                      size: 20,
+                                                      color: Colors.indigo,
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Text(
+                                                        '$index. $subTitle',
+                                                        style: const TextStyle(
+                                                          fontSize: 15,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.indigo,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (points.isNotEmpty) ...[
+                                                  const SizedBox(height: 8),
+                                                  Padding(
+                                                    padding: const EdgeInsets.only(left: 28.0),
+                                                    child: Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: points.map<Widget>((p) {
+                                                        return Padding(
+                                                          padding: const EdgeInsets.only(bottom: 4.0),
+                                                          child: Row(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              const Text('• ', style: TextStyle(color: Colors.black54, fontWeight: FontWeight.bold)),
+                                                              Expanded(
+                                                                child: Text(
+                                                                  p.toString(),
+                                                                  style: const TextStyle(fontSize: 13.5, height: 1.4, color: Colors.black87),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        );
+                                                      }).toList(),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          );
+                                        }
+
+                                        // 2️⃣ 기존 단순 텍스트 형태 호환
+                                        return Container(
+                                          margin: const EdgeInsets.only(bottom: 8),
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.indigo.shade50.withOpacity(0.4),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: Colors.indigo.shade100),
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Icon(
+                                                Icons.check_circle_rounded,
+                                                size: 18,
+                                                color: Colors.indigo,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  '$index. ${item.toString()}',
+                                                  style: const TextStyle(
+                                                    fontSize: 14,
+                                                    height: 1.5,
+                                                    color: Colors.black87,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                              const SizedBox(height: 16),
                             ],
                           ),
-                          quizzes.isEmpty
-                              ? const Center(
-                                  child: Text('생성된 AI 복습 퀴즈가 없습니다.'))
-                              : ListView.builder(
-                                  controller: scrollController,
-                                  itemCount: quizzes.length,
-                                  itemBuilder: (context, qIdx) {
-                                    final quiz = quizzes[qIdx];
-                                    return QuizCardWidget(
-                                        quiz: quiz, index: qIdx);
-                                  },
-                                ),
+
+                          // 2️⃣ STT 원문 탭
                           ListView(
                             controller: scrollController,
                             children: [
@@ -1013,6 +1256,9 @@ FilePickerResult? result = await FilePicker.pickFiles(
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // 🎨 메인 화면 UI 빌드
+  // ---------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final subjects = context.watch<SubjectProvider>().subjects;
@@ -1173,7 +1419,7 @@ FilePickerResult? result = await FilePicker.pickFiles(
                           children: [
                             CircularProgressIndicator(),
                             SizedBox(height: 8),
-                            Text('AI 파이프라인 진행 중 (STT ➔ 요약 ➔ 퀴즈)...'),
+                            Text('AI 파이프라인 진행 중 (STT ➔ AI 요약)...'),
                           ],
                         ),
                       ),
@@ -1234,7 +1480,7 @@ FilePickerResult? result = await FilePicker.pickFiles(
                         color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                   subtitle: const Text(
-                    '클릭하여 핵심 요약, 퀴즈, STT 원문 확인',
+                    '클릭하여 핵심 요약 및 STT 원문 확인',
                     style: TextStyle(color: Colors.white70),
                   ),
                   trailing:
@@ -1416,108 +1662,6 @@ FilePickerResult? result = await FilePicker.pickFiles(
                       );
                     },
                   ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 🧩 퀴즈 전용 위젯
-// ---------------------------------------------------------------------------
-class QuizCardWidget extends StatefulWidget {
-  final dynamic quiz;
-  final int index;
-
-  const QuizCardWidget({super.key, required this.quiz, required this.index});
-
-  @override
-  State<QuizCardWidget> createState() => _QuizCardWidgetState();
-}
-
-class _QuizCardWidgetState extends State<QuizCardWidget> {
-  int? selectedOption;
-
-  @override
-  Widget build(BuildContext context) {
-    final options =
-        (widget.quiz['options'] ?? widget.quiz['choices'] ?? []) as List<dynamic>;
-    final int correctAnswer =
-        widget.quiz['answer'] ?? widget.quiz['correctIndex'] ?? 0;
-    final String explanation =
-        widget.quiz['explanation'] ?? '핵심 요약 내용을 참고하세요.';
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(14.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Q${widget.index + 1}. ${widget.quiz['question'] ?? '문제'}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-            ),
-            const SizedBox(height: 10),
-            ...options.asMap().entries.map((entry) {
-              int optIdx = entry.key;
-              String optText = entry.value.toString();
-
-              bool isSelected = selectedOption == optIdx;
-              bool isCorrect = optIdx == correctAnswer;
-
-              Color? tileColor;
-              if (selectedOption != null) {
-                if (isCorrect) {
-                  tileColor = Colors.green.shade50;
-                } else if (isSelected) {
-                  tileColor = Colors.red.shade50;
-                }
-              }
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                decoration: BoxDecoration(
-                  color: tileColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListTile(
-                  dense: true,
-                  title: Text('${optIdx + 1}) $optText'),
-                  leading: Icon(
-                    selectedOption != null && isCorrect
-                        ? Icons.check_circle
-                        : (isSelected
-                            ? Icons.cancel
-                            : Icons.radio_button_unchecked),
-                    color: selectedOption != null && isCorrect
-                        ? Colors.green
-                        : (isSelected ? Colors.red : Colors.grey),
-                  ),
-                  onTap: () {
-                    setState(() {
-                      selectedOption = optIdx;
-                    });
-                  },
-                ),
-              );
-            }),
-            if (selectedOption != null) ...[
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '💡 해설: $explanation',
-                  style: const TextStyle(fontSize: 13, color: Colors.blueGrey),
-                ),
-              ),
-            ],
           ],
         ),
       ),

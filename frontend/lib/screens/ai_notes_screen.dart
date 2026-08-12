@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/api_service.dart';
@@ -25,13 +26,11 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   @override
   void initState() {
     super.initState();
-    // 화면이 처음 활성화될 때 Provider 데이터 기반으로 노트 로드
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncAndFetchNotes();
     });
   }
 
-  // Provider 목록을 참조하여 첫 번 과목 노트 불러오기
   void _syncAndFetchNotes() {
     final subjects = context.read<SubjectProvider>().subjects;
     if (subjects.isNotEmpty) {
@@ -50,7 +49,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // 선택된 과목의 강의 요약 노트 목록 불러오기
   Future<void> _fetchNotesForSubject(int subjectId) async {
     setState(() {
       _isLoadingNotes = true;
@@ -74,7 +72,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // 강의 노트 제목 수정 API 호출
   Future<void> _renameLectureNote(int lectureId, String newTitle) async {
     try {
       final baseUrl = ApiConfig.baseUrl;
@@ -109,7 +106,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // ✨ 강의 노트 삭제 API 호출
   Future<void> _deleteLectureNote(int lectureId) async {
     try {
       final baseUrl = ApiConfig.baseUrl;
@@ -142,7 +138,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // ✨ 삭제 확인 다이얼로그
   void _showDeleteConfirmDialog(int lectureId, String noteTitle) {
     showDialog(
       context: context,
@@ -178,7 +173,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     );
   }
 
-  // 제목 수정 다이얼로그
   void _showEditTitleDialog(int lectureId, String currentTitle) {
     final titleController = TextEditingController(text: currentTitle);
 
@@ -228,7 +222,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     );
   }
 
-  // AI 퀴즈 풀어보기 모달 다이얼로그
   void _showQuizDialog(List<dynamic> quizzes) {
     if (quizzes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -362,15 +355,12 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Provider로부터 실시간 최신 과목 목록을 관찰(watch)합니다.
     final subjects = context.watch<SubjectProvider>().subjects;
 
-    // 현재 선택된 ID가 실제 subjects 리스트 안에 존재하는지 안전 검사 (에러 방지 핵심)
     final bool isSelectedValid = subjects.any(
       (s) => int.tryParse(s['id'].toString()) == _selectedSubjectId,
     );
 
-    // 만약 선택된 과목이 목록에 없으면 첫 번째 과목으로 자동 보정
     final int? currentSelectedValue = isSelectedValid
         ? _selectedSubjectId
         : (subjects.isNotEmpty ? int.tryParse(subjects.first['id'].toString()) : null);
@@ -394,7 +384,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       ),
       body: Column(
         children: [
-          // 과목 선택 드롭다운 영역
           Container(
             padding: const EdgeInsets.all(16.0),
             color: Colors.indigo.shade50,
@@ -437,15 +426,11 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
               ],
             ),
           ),
-
-          // 에러 메시지 출력 영역
           if (_errorMessage != null)
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
             ),
-
-          // 강의 노트 목록 출력 영역
           Expanded(
             child: _isLoadingNotes
                 ? const Center(child: CircularProgressIndicator())
@@ -490,104 +475,589 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          titleText,
-                                          style: const TextStyle(
-                                              fontSize: 18, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                      Row(
-                                        children: [
-                                          IconButton(
-                                            icon: const Icon(Icons.edit_outlined,
-                                                color: Colors.indigo, size: 20),
-                                            tooltip: '노트 제목 수정',
-                                            onPressed: () =>
-                                                _showEditTitleDialog(noteId, titleText),
-                                          ),
-                                          // ✨ 노트 삭제 버튼 추가
-                                          IconButton(
-                                            icon: const Icon(Icons.delete_outline,
-                                                color: Colors.redAccent, size: 20),
-                                            tooltip: '노트 삭제',
-                                            onPressed: () =>
-                                                _showDeleteConfirmDialog(noteId, titleText),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            displayDate,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => LectureNoteDetailScreen(noteData: note),
+                                  ),
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            titleText,
                                             style: const TextStyle(
-                                                color: Colors.grey, fontSize: 13),
+                                                fontSize: 18, fontWeight: FontWeight.bold),
                                           ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  const Divider(height: 24),
-                                  const Text(
-                                    '📝 핵심 요약',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold, color: Colors.indigo),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    note['summary'] ?? '요약 내용이 없습니다.',
-                                    style: const TextStyle(
-                                        fontSize: 14, height: 1.4, color: Colors.black87),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  const Text(
-                                    '🏷️ 주요 키워드',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold, color: Colors.indigo),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Wrap(
-                                    spacing: 6,
-                                    runSpacing: 4,
-                                    children: keywords.map((kw) {
-                                      return Chip(
-                                        label: Text(
-                                          kw.toString(),
-                                          style: const TextStyle(fontSize: 12),
                                         ),
-                                        backgroundColor: Colors.indigo.shade50,
-                                        labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-                                        visualDensity: VisualDensity.compact,
-                                      );
-                                    }).toList(),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton.icon(
-                                      onPressed: () => _showQuizDialog(quizzes),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.indigo,
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
+                                        Row(
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(Icons.edit_outlined,
+                                                  color: Colors.indigo, size: 20),
+                                              tooltip: '노트 제목 수정',
+                                              onPressed: () =>
+                                                  _showEditTitleDialog(noteId, titleText),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.delete_outline,
+                                                  color: Colors.redAccent, size: 20),
+                                              tooltip: '노트 삭제',
+                                              onPressed: () =>
+                                                  _showDeleteConfirmDialog(noteId, titleText),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              displayDate,
+                                              style: const TextStyle(
+                                                  color: Colors.grey, fontSize: 13),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                      icon: const Icon(Icons.quiz_outlined),
-                                      label: Text('AI 복습 퀴즈 풀어보기 (${quizzes.length}문항)'),
+                                      ],
                                     ),
-                                  ),
-                                ],
+                                    const Divider(height: 24),
+                                    const Text(
+                                      '📝 핵심 요약',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold, color: Colors.indigo),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      note['summary'] ?? '요약 내용이 없습니다.',
+                                      style: const TextStyle(
+                                          fontSize: 14, height: 1.4, color: Colors.black87),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    const Text(
+                                      '🏷️ 주요 키워드',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold, color: Colors.indigo),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: keywords.map((kw) {
+                                        return Chip(
+                                          label: Text(
+                                            kw.toString(),
+                                            style: const TextStyle(fontSize: 12),
+                                          ),
+                                          backgroundColor: Colors.indigo.shade50,
+                                          labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                                          visualDensity: VisualDensity.compact,
+                                        );
+                                      }).toList(),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton.icon(
+                                        onPressed: () => _showQuizDialog(quizzes),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.indigo,
+                                          foregroundColor: Colors.white,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                        ),
+                                        icon: const Icon(Icons.quiz_outlined),
+                                        label: Text('AI 복습 퀴즈 풀어보기 (${quizzes.length}문항)'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           );
                         },
                       ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
+// ===========================================================================
+class LectureNoteDetailScreen extends StatefulWidget {
+  final Map<String, dynamic> noteData;
+
+  const LectureNoteDetailScreen({super.key, required this.noteData});
+
+  @override
+  State<LectureNoteDetailScreen> createState() => _LectureNoteDetailScreenState();
+}
+
+class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
+  int _currentTabIndex = 1; // 기본값: 1번 탭 (세부 강의노트)
+  
+  // STT 정제 상태 관리
+  int _sttViewMode = 0; // 0: 가독성 정제본, 1: 원문 그대로
+  String? _cleanedTranscript;
+  bool _isLoadingCleanSTT = false;
+
+  // 맞춤 AI 노트 상태 관리
+  String _selectedFormat = 'cornell';
+  String? _generatedCustomContent;
+  bool _isLoadingFormat = false;
+
+  final Map<String, Map<String, dynamic>> _formatOptions = {
+    'cornell': {
+      'title': '코넬 노트',
+      'desc': '핵심 키워드, 질문, 체계적 필기 및 최종 요약',
+      'icon': Icons.view_sidebar_outlined,
+    },
+    'exam': {
+      'title': '시험 대비 노트',
+      'desc': '교수님 강조 내용, 중요도, 암기 포인트, 실전 예상 시험 문제',
+      'icon': Icons.assignment_turned_in_outlined,
+    },
+    'outline': {
+      'title': '아웃라인 노트',
+      'desc': '주제와 하위 주제를 계층화하여 전체 개념 구조를 개조식 정리',
+      'icon': Icons.format_list_bulleted,
+    },
+    'flashcard': {
+      'title': '플래시카드',
+      'desc': '앞면 질문과 뒷면 정답/설명으로 구성된 반복 암기 카드',
+      'icon': Icons.style_outlined,
+    },
+    'feynman': {
+      'title': 'Feynman 노트',
+      'desc': '전문 용어를 배제하고 쉬운 말과 비유로 직관적 해설',
+      'icon': Icons.psychology_outlined,
+    },
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    // 기존에 DB에 저장된 정제본이 있다면 우선 활용
+    _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
+  }
+
+  // 1. STT 가독성 정제본 요청
+  Future<void> _fetchCleanedSTT() async {
+    final rawStt = widget.noteData['stt_text'] ??
+        widget.noteData['transcript'] ??
+        widget.noteData['stt_transcript'] ??
+        '';
+
+    if (rawStt.isEmpty) return;
+
+    setState(() => _isLoadingCleanSTT = true);
+
+    try {
+      final baseUrl = ApiConfig.baseUrl;
+      final response = await http.post(
+        Uri.parse('$baseUrl/notes/clean-stt'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode({'stt_text': rawStt}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        setState(() {
+          _cleanedTranscript = data['cleaned_text'];
+        });
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('정제본 생성 실패 (${response.statusCode})')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('네트워크 오류: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingCleanSTT = false);
+      }
+    }
+  }
+
+  // 2. 5대 맞춤 노트 생성 요청
+  Future<void> _fetchCustomFormat(String formatType) async {
+    setState(() {
+      _selectedFormat = formatType;
+      _isLoadingFormat = true;
+    });
+
+    try {
+      final baseUrl = ApiConfig.baseUrl;
+      final stt = widget.noteData['stt_text'] ??
+          widget.noteData['transcript'] ??
+          widget.noteData['summary'] ??
+          '';
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/notes/generate-custom'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode({
+          'stt_text': stt,
+          'format_type': formatType,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        setState(() {
+          _generatedCustomContent = data['content'];
+        });
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('생성 실패 (${response.statusCode})')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('네트워크 오류: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingFormat = false);
+      }
+    }
+  }
+
+  void _showFormatSelectSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '✨ AI 정리노트 형식 선택',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              ..._formatOptions.entries.map((entry) {
+                final key = entry.key;
+                final info = entry.value;
+                return ListTile(
+                  leading: Icon(info['icon'] as IconData, color: Colors.indigo),
+                  title: Text(info['title'] as String,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(info['desc'] as String, style: const TextStyle(fontSize: 12)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _fetchCustomFormat(key);
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatDetailedSummary(dynamic detailedData) {
+    if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
+    if (detailedData is String && detailedData.trim().isNotEmpty) {
+      return detailedData;
+    }
+    if (detailedData is List) {
+      if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
+      return detailedData.map((item) {
+        if (item is Map) {
+          final title = item['topic'] ?? item['title'] ?? '주요 내용';
+          final desc = item['content'] ?? item['description'] ?? '';
+          return '### 📌 $title\n$desc\n';
+        }
+        return '- $item';
+      }).join('\n\n');
+    }
+    return detailedData.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.noteData['title'] ??
+        widget.noteData['lecture_title'] ??
+        widget.noteData['filename'] ??
+        '강의 상세 노트';
+
+    final sttRawText = widget.noteData['stt_text'] ??
+        widget.noteData['transcript'] ??
+        widget.noteData['stt_transcript'] ??
+        '추출된 STT 원문 텍스트가 없습니다.';
+
+    final detailedSummaryRaw = widget.noteData['detailed_summary'] ??
+        widget.noteData['detail_summary'] ??
+        widget.noteData['details'] ??
+        widget.noteData['summary'];
+
+    final formattedDetailedSummary = _formatDetailedSummary(detailedSummaryRaw);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          if (_currentTabIndex == 2)
+            IconButton(
+              icon: const Icon(Icons.style_outlined),
+              tooltip: '양식 변경',
+              onPressed: _showFormatSelectSheet,
+            ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: IndexedStack(
+          index: _currentTabIndex,
+          children: [
+            // ==========================================
+            // 0️⃣ STT 스크립트 (가독성 정제본 / 원문 토글)
+            // ==========================================
+            Column(
+              children: [
+                // 정제본 / 원문 선택 세그먼트 버튼
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 0,
+                      label: Text('✨ AI 가독성 정제본'),
+                      icon: Icon(Icons.auto_fix_high),
+                    ),
+                    ButtonSegment(
+                      value: 1,
+                      label: Text('📝 원문 그대로'),
+                      icon: Icon(Icons.raw_on_outlined),
+                    ),
+                  ],
+                  selected: {_sttViewMode},
+                  onSelectionChanged: (Set<int> newSelection) {
+                    setState(() {
+                      _sttViewMode = newSelection.first;
+                    });
+                    // 정제본 탭 선택 시 데이터가 없으면 자동 호출
+                    if (_sttViewMode == 0 && _cleanedTranscript == null && !_isLoadingCleanSTT) {
+                      _fetchCleanedSTT();
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Card(
+                    elevation: 0,
+                    color: Colors.grey.shade50,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: _sttViewMode == 1
+                          // 원문 그대로
+                          ? SingleChildScrollView(
+                              child: SelectableText(
+                                sttRawText,
+                                style: const TextStyle(
+                                    fontSize: 15, height: 1.7, color: Colors.black87),
+                              ),
+                            )
+                          // 가독성 정제본
+                          : _isLoadingCleanSTT
+                              ? const Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      CircularProgressIndicator(),
+                                      SizedBox(height: 12),
+                                      Text('STT 스크립트를 읽기 쉽게 정제하는 중입니다...'),
+                                    ],
+                                  ),
+                                )
+                              : _cleanedTranscript == null
+                                  ? Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const Text('아직 생성된 가독성 정제본이 없습니다.'),
+                                          const SizedBox(height: 8),
+                                          ElevatedButton.icon(
+                                            onPressed: _fetchCleanedSTT,
+                                            icon: const Icon(Icons.auto_fix_high),
+                                            label: const Text('지금 정제본 생성하기'),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : SingleChildScrollView(
+                                      child: MarkdownBody(
+                                        data: _cleanedTranscript!,
+                                        styleSheet: MarkdownStyleSheet.fromTheme(
+                                                Theme.of(context))
+                                            .copyWith(
+                                          p: const TextStyle(
+                                              fontSize: 15, height: 1.6, color: Colors.black87),
+                                          h2: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.indigo),
+                                        ),
+                                      ),
+                                    ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // ==========================================
+            // 1️⃣ 세부 강의노트
+            // ==========================================
+            SingleChildScrollView(
+              child: Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.grey.shade200),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: MarkdownBody(
+                    data: formattedDetailedSummary,
+                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      p: const TextStyle(fontSize: 15, height: 1.6),
+                      h3: const TextStyle(
+                          fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // ==========================================
+            // 2️⃣ ✨ 5대 AI 맞춤 정리노트
+            // ==========================================
+            _isLoadingFormat
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('AI가 맞춤 노트를 생성하고 있습니다...',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  )
+                : _generatedCustomContent == null
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.auto_awesome, size: 56, color: Colors.indigo),
+                            const SizedBox(height: 12),
+                            const Text(
+                              '원하는 학습 노트 형식을 선택하세요.',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              '코넬, 시험 대비, 아웃라인, 플래시카드, Feynman 테크닉을 지원합니다.',
+                              style: TextStyle(color: Colors.grey, fontSize: 13),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _showFormatSelectSheet,
+                              icon: const Icon(Icons.format_shapes),
+                              label: const Text('양식 선택 및 생성하기'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.indigo,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : SingleChildScrollView(
+                        child: Card(
+                          elevation: 0,
+                          color: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: Colors.indigo.shade100),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: MarkdownBody(
+                              data: _generatedCustomContent!,
+                              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                                p: const TextStyle(fontSize: 15, height: 1.6),
+                                h1: const TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo),
+                                h2: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigoAccent),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentTabIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _currentTabIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.description_outlined),
+            selectedIcon: Icon(Icons.description),
+            label: 'STT 스크립트',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book),
+            label: '세부 강의노트',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.auto_awesome_outlined),
+            selectedIcon: Icon(Icons.auto_awesome),
+            label: 'AI 맞춤노트',
           ),
         ],
       ),

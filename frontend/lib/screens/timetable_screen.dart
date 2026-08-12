@@ -121,6 +121,77 @@ class _TimetableScreenState extends State<TimetableScreen> {
     }
   }
 
+  int _timeOfDayToMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
+
+  // ---------------------------------------------------------------------------
+  // 🕒 시간 검증 로직 (역전 방지 + 중복 방지)
+  // ---------------------------------------------------------------------------
+  String? _validateSchedules(
+    List<CourseScheduleItem> schedules,
+    List<dynamic> allSubjects, {
+    int? currentEditingSubjectId,
+  }) {
+    for (int i = 0; i < schedules.length; i++) {
+      final item = schedules[i];
+      final startMin = _timeOfDayToMinutes(item.startTime);
+      final endMin = _timeOfDayToMinutes(item.endTime);
+
+      if (startMin >= endMin) {
+        return '${item.day}요일의 종료 시간은 시작 시간보다 늦어야 합니다.';
+      }
+    }
+
+    for (int i = 0; i < schedules.length; i++) {
+      for (int j = i + 1; j < schedules.length; j++) {
+        if (schedules[i].day == schedules[j].day) {
+          final s1 = _timeOfDayToMinutes(schedules[i].startTime);
+          final e1 = _timeOfDayToMinutes(schedules[i].endTime);
+          final s2 = _timeOfDayToMinutes(schedules[j].startTime);
+          final e2 = _timeOfDayToMinutes(schedules[j].endTime);
+
+          if (s1 < e2 && e1 > s2) {
+            return '입력한 일정 중 ${schedules[i].day}요일 일정이 서로 겹칩니다.';
+          }
+        }
+      }
+    }
+
+    for (final newSch in schedules) {
+      final newStart = _timeOfDayToMinutes(newSch.startTime);
+      final newEnd = _timeOfDayToMinutes(newSch.endTime);
+
+      for (final sub in allSubjects) {
+        final int subId = int.tryParse(sub['id']?.toString() ?? '') ?? 0;
+        if (currentEditingSubjectId != null && subId == currentEditingSubjectId) {
+          continue;
+        }
+
+        final String existingSlotStr =
+            sub['time_slot'] ?? sub['schedule'] ?? sub['time'] ?? '';
+        final slots = existingSlotStr.split(',');
+
+        for (final slot in slots) {
+          final match = RegExp(r'([월화수목금토일])\s*(\d{2}:\d{2})~(\d{2}:\d{2})')
+              .firstMatch(slot.trim());
+          if (match != null) {
+            final existDay = match.group(1);
+            final existStart = _timeToMinutes(match.group(2)!);
+            final existEnd = _timeToMinutes(match.group(3)!);
+
+            if (existDay == newSch.day) {
+              if (newStart < existEnd && newEnd > existStart) {
+                final subName = sub['title'] ?? sub['name'] ?? '다른 과목';
+                return '해당 시간에 이미 수업이 등록되어 있습니다.\n($subName: $existDay ${match.group(2)}~${match.group(3)})';
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
   // ---------------------------------------------------------------------------
   // 🗓️ 동적 시간표 리스트 다이얼로그 위젯
   // ---------------------------------------------------------------------------
@@ -276,9 +347,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
         '';
 
     if (rawTimeSlot.isNotEmpty) {
-      final slotParts = rawTimeSlot.split(', ');
+      final slotParts = rawTimeSlot.split(',');
       for (var slot in slotParts) {
-        schedules.add(CourseScheduleItem.fromSlotString(slot));
+        schedules.add(CourseScheduleItem.fromSlotString(slot.trim()));
       }
     }
 
@@ -382,6 +453,28 @@ class _TimetableScreenState extends State<TimetableScreen> {
                       return;
                     }
 
+                    final provider = context.read<SubjectProvider>();
+                    final int? currentEditingId = existingItem != null
+                        ? int.tryParse(existingItem['id']?.toString() ?? '')
+                        : null;
+
+                    final validationError = _validateSchedules(
+                      schedules,
+                      provider.subjects,
+                      currentEditingSubjectId: currentEditingId,
+                    );
+
+                    if (validationError != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(validationError),
+                          backgroundColor: Colors.redAccent,
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                      return;
+                    }
+
                     final String title = titleController.text.trim();
                     final String instructor =
                         instructorController.text.trim().isEmpty
@@ -390,7 +483,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
                     final String timeSlot =
                         schedules.map((s) => s.toSlotString()).join(', ');
-                    final provider = context.read<SubjectProvider>();
 
                     if (existingItem != null) {
                       final targetSub = provider.subjects.firstWhere(
