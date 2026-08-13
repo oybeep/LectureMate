@@ -18,7 +18,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   final ApiService _apiService = ApiService();
 
   int? _selectedSubjectId;
-
   List<dynamic> _notes = [];
   bool _isLoadingNotes = false;
   String? _errorMessage;
@@ -32,6 +31,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   }
 
   void _syncAndFetchNotes() {
+    if (!mounted) return;
     final subjects = context.read<SubjectProvider>().subjects;
     if (subjects.isNotEmpty) {
       if (_selectedSubjectId == null ||
@@ -57,18 +57,22 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
     try {
       final notesData = await _apiService.getLecturesBySubject(subjectId);
+      if (!mounted) return;
       setState(() {
         _notes = notesData;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _notes = [];
         _errorMessage = '노트를 불러오는 중 오류가 발생했습니다: $e';
       });
     } finally {
-      setState(() {
-        _isLoadingNotes = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoadingNotes = false;
+        });
+      }
     }
   }
 
@@ -81,28 +85,25 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         body: jsonEncode({'title': newTitle}),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('노트 제목이 변경되었습니다.')),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('노트 제목이 변경되었습니다.')),
+        );
         if (_selectedSubjectId != null) {
           await _fetchNotesForSubject(_selectedSubjectId!);
         }
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('제목 수정 실패 (${response.statusCode})')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('네트워크 오류로 제목을 수정하지 못했습니다: $e')),
+          SnackBar(content: Text('제목 수정 실패 (${response.statusCode})')),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('네트워크 오류로 제목을 수정하지 못했습니다: $e')),
+      );
     }
   }
 
@@ -113,35 +114,32 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         Uri.parse('$baseUrl/lectures/$lectureId'),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('노트가 삭제되었습니다.')),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('노트가 삭제되었습니다.')),
+        );
         if (_selectedSubjectId != null) {
           await _fetchNotesForSubject(_selectedSubjectId!);
         }
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('노트 삭제 실패 (${response.statusCode})')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('네트워크 오류로 노트를 삭제하지 못했습니다: $e')),
+          SnackBar(content: Text('노트 삭제 실패 (${response.statusCode})')),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('네트워크 오류로 노트를 삭제하지 못했습니다: $e')),
+      );
     }
   }
 
   void _showDeleteConfirmDialog(int lectureId, String noteTitle) {
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Row(
             children: [
@@ -153,7 +151,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           content: Text("'$noteTitle' 노트를 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다."),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('취소', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
@@ -162,7 +160,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                 foregroundColor: Colors.white,
               ),
               onPressed: () async {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 await _deleteLectureNote(lectureId);
               },
               child: const Text('삭제'),
@@ -178,7 +176,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Row(
             children: [
@@ -197,17 +195,15 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('취소'),
             ),
             ElevatedButton(
               onPressed: () async {
                 final updatedTitle = titleController.text.trim();
                 if (updatedTitle.isNotEmpty) {
+                  Navigator.pop(dialogContext);
                   await _renameLectureNote(lectureId, updatedTitle);
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                  }
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('제목을 입력해 주세요.')),
@@ -236,7 +232,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             final quiz = quizzes[currentQuizIndex];
@@ -342,7 +338,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                   )
                 else
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () => Navigator.pop(dialogContext),
                     child: const Text('닫기'),
                   ),
               ],
@@ -593,6 +589,12 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 // ===========================================================================
 // 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
 // ===========================================================================
+
+// API 설정을 위한 가상의 클래스 (프로젝트의 실제 경로에 맞게 참조/수정하세요)
+class ApiConfig {
+  static const String baseUrl = 'http://127.0.0.1:8000'; // 예시 URL
+}
+
 class LectureNoteDetailScreen extends StatefulWidget {
   final Map<String, dynamic> noteData;
 
@@ -604,7 +606,7 @@ class LectureNoteDetailScreen extends StatefulWidget {
 
 class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   int _currentTabIndex = 1; // 기본값: 1번 탭 (세부 강의노트)
-  
+
   // STT 정제 상태 관리
   int _sttViewMode = 0; // 0: 가독성 정제본, 1: 원문 그대로
   String? _cleanedTranscript;
@@ -646,12 +648,12 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // 💡 DB에 저장되어 있던 정제본 및 맞춤노트 불러오기
+    // DB에 저장되어 있던 정제본 및 맞춤노트 불러오기
     _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
     _generatedCustomContent = widget.noteData['custom_note'] ?? widget.noteData['custom_content'];
   }
 
-  // 💡 백엔드 DB에 업데이트 사항을 영구 저장하는 헬퍼 함수
+  // 백엔드 DB에 업데이트 사항을 영구 저장하는 헬퍼 함수
   Future<void> _updateLectureInDb(Map<String, dynamic> updateFields) async {
     final noteId = int.tryParse((widget.noteData['id'] ?? widget.noteData['lecture_id']).toString()) ?? 0;
     if (noteId == 0) return;
@@ -690,15 +692,14 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final cleaned = data['cleaned_text'] as String?;
-        
+
         setState(() {
           _cleanedTranscript = cleaned;
         });
 
-        // 💡 화면 객체 및 DB에 동시 저장하여 영구 유지
+        // 화면 객체 및 DB에 동시 저장하여 영구 유지
         widget.noteData['cleaned_transcript'] = cleaned;
         await _updateLectureInDb({'cleaned_transcript': cleaned});
-
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -750,10 +751,9 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
           _generatedCustomContent = content;
         });
 
-        // 💡 화면 객체 및 DB에 동시 저장하여 영구 유지
+        // 화면 객체 및 DB에 동시 저장하여 영구 유지
         widget.noteData['custom_note'] = content;
         await _updateLectureInDb({'custom_note': content});
-
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1102,8 +1102,8 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
             label: 'STT 스크립트',
           ),
           NavigationDestination(
-            icon: Icon(Icons.menu_book_outlined),
-            selectedIcon: Icon(Icons.menu_book),
+            icon: Icon(Icons.notes_outlined),
+            selectedIcon: Icon(Icons.notes),
             label: '세부 강의노트',
           ),
           NavigationDestination(
