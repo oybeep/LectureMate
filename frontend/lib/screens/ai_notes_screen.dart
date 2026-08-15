@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 import '../services/api_service.dart';
 import '../main.dart'; // ApiConfig 참조
 import 'package:provider/provider.dart';
@@ -21,6 +22,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   List<dynamic> _notes = [];
   bool _isLoadingNotes = false;
   String? _errorMessage;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
@@ -28,6 +30,12 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncAndFetchNotes();
     });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel(); // 화면 이탈 시 타이머 해제
+    super.dispose();
   }
 
   void _syncAndFetchNotes() {
@@ -49,18 +57,25 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  Future<void> _fetchNotesForSubject(int subjectId) async {
-    setState(() {
-      _isLoadingNotes = true;
-      _errorMessage = null;
-    });
+  Future<void> _fetchNotesForSubject(int subjectId, {bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoadingNotes = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final notesData = await _apiService.getLecturesBySubject(subjectId);
       if (!mounted) return;
+
       setState(() {
         _notes = notesData;
       });
+
+      // 💡 백그라운드 작업(STT/요약) 중인 노트가 있는지 확인 후 자동 폴링 시작
+      _checkAndStartPolling(subjectId);
+
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -68,11 +83,29 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         _errorMessage = '노트를 불러오는 중 오류가 발생했습니다: $e';
       });
     } finally {
-      if (mounted) {
+      if (mounted && showLoading) {
         setState(() {
           _isLoadingNotes = false;
         });
       }
+    }
+  }
+
+  // 💡 요약/키워드가 비어있는 노트가 있다면 completed 될 때까지 3초마다 재조회
+  void _checkAndStartPolling(int subjectId) {
+    _pollingTimer?.cancel();
+
+    bool hasPendingNotes = _notes.any((note) {
+      final summary = note['summary']?.toString().trim();
+      return summary == null || summary.isEmpty || summary == '요약 내용이 없습니다.';
+    });
+
+    if (hasPendingNotes) {
+      _pollingTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted && _selectedSubjectId == subjectId) {
+          _fetchNotesForSubject(subjectId, showLoading: false);
+        }
+      });
     }
   }
 
@@ -92,7 +125,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           const SnackBar(content: Text('노트 제목이 변경되었습니다.')),
         );
         if (_selectedSubjectId != null) {
-          await _fetchNotesForSubject(_selectedSubjectId!);
+          await _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -121,7 +154,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           const SnackBar(content: Text('노트가 삭제되었습니다.')),
         );
         if (_selectedSubjectId != null) {
-          await _fetchNotesForSubject(_selectedSubjectId!);
+          await _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -353,6 +386,14 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   Widget build(BuildContext context) {
     final subjects = context.watch<SubjectProvider>().subjects;
 
+    // SubjectProvider가 변경될 때 과목 아이디 자동 동기화
+    if (subjects.isNotEmpty && _selectedSubjectId == null) {
+      _selectedSubjectId = int.tryParse(subjects.first['id'].toString());
+      if (_selectedSubjectId != null) {
+        _fetchNotesForSubject(_selectedSubjectId!);
+      }
+    }
+
     final bool isSelectedValid = subjects.any(
       (s) => int.tryParse(s['id'].toString()) == _selectedSubjectId,
     );
@@ -430,155 +471,191 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           Expanded(
             child: _isLoadingNotes
                 ? const Center(child: CircularProgressIndicator())
-                : _notes.isEmpty
-                    ? const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.note_alt_outlined, size: 64, color: Colors.grey),
-                            SizedBox(height: 12),
-                            Text(
-                              '해당 과목에 저장된 AI 요약 노트가 없습니다.',
-                              style: TextStyle(color: Colors.grey, fontSize: 16),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _notes.length,
-                        itemBuilder: (context, index) {
-                          final note = Map<String, dynamic>.from(_notes[index]);
-                          final int noteId =
-                              int.tryParse((note['id'] ?? note['lecture_id']).toString()) ?? 0;
-                          final String titleText = note['title'] ??
-                              note['lecture_title'] ??
-                              note['filename'] ??
-                              '강의 노트 ${index + 1}';
-
-                          final List<dynamic> keywords =
-                              note['keywords'] ?? note['key_concepts'] ?? ['AI 분석'];
-                          final List<dynamic> quizzes = note['quizzes'] ?? note['quiz'] ?? [];
-
-                          final String createdAtText =
-                              note['created_at']?.toString() ?? note['date']?.toString() ?? '';
-                          final String displayDate =
-                              createdAtText.length >= 10 ? createdAtText.substring(0, 10) : '저장됨';
-
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 16),
-                            elevation: 3,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => LectureNoteDetailScreen(noteData: note),
-                                  ),
-                                );
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0),
+                : RefreshIndicator(
+                    onRefresh: () async {
+                      if (currentSelectedValue != null) {
+                        await _fetchNotesForSubject(currentSelectedValue);
+                      }
+                    },
+                    child: _notes.isEmpty
+                        ? ListView(
+                            children: const [
+                              SizedBox(height: 150),
+                              Center(
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            titleText,
-                                            style: const TextStyle(
-                                                fontSize: 18, fontWeight: FontWeight.bold),
-                                          ),
-                                        ),
-                                        Row(
-                                          children: [
-                                            IconButton(
-                                              icon: const Icon(Icons.edit_outlined,
-                                                  color: Colors.indigo, size: 20),
-                                              tooltip: '노트 제목 수정',
-                                              onPressed: () =>
-                                                  _showEditTitleDialog(noteId, titleText),
-                                            ),
-                                            IconButton(
-                                              icon: const Icon(Icons.delete_outline,
-                                                  color: Colors.redAccent, size: 20),
-                                              tooltip: '노트 삭제',
-                                              onPressed: () =>
-                                                  _showDeleteConfirmDialog(noteId, titleText),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              displayDate,
-                                              style: const TextStyle(
-                                                  color: Colors.grey, fontSize: 13),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                    const Divider(height: 24),
-                                    const Text(
-                                      '📝 핵심 요약',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold, color: Colors.indigo),
-                                    ),
-                                    const SizedBox(height: 6),
+                                    Icon(Icons.note_alt_outlined, size: 64, color: Colors.grey),
+                                    SizedBox(height: 12),
                                     Text(
-                                      note['summary'] ?? '요약 내용이 없습니다.',
-                                      style: const TextStyle(
-                                          fontSize: 14, height: 1.4, color: Colors.black87),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    const Text(
-                                      '🏷️ 주요 키워드',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold, color: Colors.indigo),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Wrap(
-                                      spacing: 6,
-                                      runSpacing: 4,
-                                      children: keywords.map((kw) {
-                                        return Chip(
-                                          label: Text(
-                                            kw.toString(),
-                                            style: const TextStyle(fontSize: 12),
-                                          ),
-                                          backgroundColor: Colors.indigo.shade50,
-                                          labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-                                          visualDensity: VisualDensity.compact,
-                                        );
-                                      }).toList(),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton.icon(
-                                        onPressed: () => _showQuizDialog(quizzes),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.indigo,
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(10),
-                                          ),
-                                        ),
-                                        icon: const Icon(Icons.quiz_outlined),
-                                        label: Text('AI 복습 퀴즈 풀어보기 (${quizzes.length}문항)'),
-                                      ),
+                                      '해당 과목에 저장된 AI 요약 노트가 없습니다.',
+                                      style: TextStyle(color: Colors.grey, fontSize: 16),
                                     ),
                                   ],
                                 ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
+                            ],
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _notes.length,
+                            itemBuilder: (context, index) {
+                              final note = Map<String, dynamic>.from(_notes[index]);
+                              final int noteId =
+                                  int.tryParse((note['id'] ?? note['lecture_id']).toString()) ?? 0;
+                              final String titleText = note['title'] ??
+                                  note['lecture_title'] ??
+                                  note['filename'] ??
+                                  '강의 노트 ${index + 1}';
+
+                              // 💡 키워드가 비어있거나 null일 경우 분기 처리
+                              final rawKeywords = note['keywords'] ?? note['key_concepts'];
+                              final List<dynamic> keywords = (rawKeywords is List && rawKeywords.isNotEmpty)
+                                  ? rawKeywords
+                                  : ['분석 중...'];
+
+                              final List<dynamic> quizzes = note['quizzes'] ?? note['quiz'] ?? [];
+
+                              final String createdAtText =
+                                  note['created_at']?.toString() ?? note['date']?.toString() ?? '';
+                              final String displayDate =
+                                  createdAtText.length >= 10 ? createdAtText.substring(0, 10) : '저장됨';
+
+                              // 요약 데이터 가공
+                              final String rawSummary = note['summary']?.toString().trim() ?? '';
+                              final bool isProcessing = rawSummary.isEmpty;
+                              final String summaryText = isProcessing
+                                  ? '⏳ 백엔드에서 AI 요약을 작성 중입니다. 잠시만 기다려주세요...'
+                                  : rawSummary;
+
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 16),
+                                elevation: 3,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(16),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => LectureNoteDetailScreen(noteData: note),
+                                      ),
+                                    );
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                titleText,
+                                                style: const TextStyle(
+                                                    fontSize: 18, fontWeight: FontWeight.bold),
+                                              ),
+                                            ),
+                                            Row(
+                                              children: [
+                                                IconButton(
+                                                  icon: const Icon(Icons.edit_outlined,
+                                                      color: Colors.indigo, size: 20),
+                                                  tooltip: '노트 제목 수정',
+                                                  onPressed: () =>
+                                                      _showEditTitleDialog(noteId, titleText),
+                                                ),
+                                                IconButton(
+                                                  icon: const Icon(Icons.delete_outline,
+                                                      color: Colors.redAccent, size: 20),
+                                                  tooltip: '노트 삭제',
+                                                  onPressed: () =>
+                                                      _showDeleteConfirmDialog(noteId, titleText),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  displayDate,
+                                                  style: const TextStyle(
+                                                      color: Colors.grey, fontSize: 13),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        const Divider(height: 24),
+                                        Row(
+                                          children: [
+                                            const Text(
+                                              '📝 핵심 요약',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold, color: Colors.indigo),
+                                            ),
+                                            if (isProcessing) ...[
+                                              const SizedBox(width: 8),
+                                              const SizedBox(
+                                                width: 12,
+                                                height: 12,
+                                                child: CircularProgressIndicator(strokeWidth: 2),
+                                              ),
+                                            ]
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          summaryText,
+                                          style: TextStyle(
+                                              fontSize: 14,
+                                              height: 1.4,
+                                              color: isProcessing ? Colors.orange.shade800 : Colors.black87),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        const Text(
+                                          '🏷️ 주요 키워드',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold, color: Colors.indigo),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          spacing: 6,
+                                          runSpacing: 4,
+                                          children: keywords.map((kw) {
+                                            return Chip(
+                                              label: Text(
+                                                kw.toString(),
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                              backgroundColor: Colors.indigo.shade50,
+                                              labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                                              visualDensity: VisualDensity.compact,
+                                            );
+                                          }).toList(),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: ElevatedButton.icon(
+                                            onPressed: () => _showQuizDialog(quizzes),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.indigo,
+                                              foregroundColor: Colors.white,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                            ),
+                                            icon: const Icon(Icons.quiz_outlined),
+                                            label: Text('AI 복습 퀴즈 풀어보기 (${quizzes.length}문항)'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
           ),
         ],
       ),
@@ -590,9 +667,8 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 // 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
 // ===========================================================================
 
-// API 설정을 위한 가상의 클래스 (프로젝트의 실제 경로에 맞게 참조/수정하세요)
 class ApiConfig {
-  static const String baseUrl = 'http://127.0.0.1:8000'; // 예시 URL
+  static const String baseUrl = 'http://127.0.0.1:8000'; // 백엔드 서버 URL
 }
 
 class LectureNoteDetailScreen extends StatefulWidget {
@@ -648,12 +724,51 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // DB에 저장되어 있던 정제본 및 맞춤노트 불러오기
+    // 💡 1. 참조 Map(widget.noteData)에서 이전 로딩 상태값을 먼저 복원
+    _isLoadingCleanSTT = widget.noteData['is_loading_stt'] ?? false;
+    _isLoadingFormat = widget.noteData['is_loading_format'] ?? false;
+
+    // 메모리에 있던 기존 데이터 세팅
     _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
     _generatedCustomContent = widget.noteData['custom_note'] ?? widget.noteData['custom_content'];
+
+    // 💡 2. 화면 진입 시 최신 DB 조회
+    _fetchLatestLectureData();
   }
 
-  // 백엔드 DB에 업데이트 사항을 영구 저장하는 헬퍼 함수
+  // 최신 데이터 조회 및 동기화
+  Future<void> _fetchLatestLectureData() async {
+    final noteId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
+    if (noteId == null) return;
+
+    try {
+      final baseUrl = ApiConfig.baseUrl;
+      final response = await http.get(Uri.parse('$baseUrl/lectures/$noteId'));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final lecture = data['data'] ?? data;
+
+        if (mounted) {
+          setState(() {
+            // 생성이 새로 시작된 게 아닐 때만 기존 완성본 업데이트
+            if (!_isLoadingCleanSTT) {
+              _cleanedTranscript = lecture['cleaned_transcript'] ?? _cleanedTranscript;
+              widget.noteData['cleaned_transcript'] = _cleanedTranscript;
+            }
+            if (!_isLoadingFormat) {
+              _generatedCustomContent = lecture['custom_note'] ?? _generatedCustomContent;
+              widget.noteData['custom_note'] = _generatedCustomContent;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('최신 강의 데이터 조회 실패: $e');
+    }
+  }
+
+  // DB 영구 저장 헬퍼
   Future<void> _updateLectureInDb(Map<String, dynamic> updateFields) async {
     final noteId = int.tryParse((widget.noteData['id'] ?? widget.noteData['lecture_id']).toString()) ?? 0;
     if (noteId == 0) return;
@@ -670,7 +785,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-  // 1. STT 가독성 정제본 요청 및 DB 자동 저장
+  // 1. STT 가독성 정제본 요청
   Future<void> _fetchCleanedSTT() async {
     final rawStt = widget.noteData['stt_text'] ??
         widget.noteData['transcript'] ??
@@ -679,27 +794,37 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
     if (rawStt.isEmpty) return;
 
-    setState(() => _isLoadingCleanSTT = true);
+    final currentLectureId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
+
+    setState(() {
+      _isLoadingCleanSTT = true;
+      widget.noteData['is_loading_stt'] = true;
+    });
 
     try {
       final baseUrl = ApiConfig.baseUrl;
       final response = await http.post(
         Uri.parse('$baseUrl/notes/clean-stt'),
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode({'stt_text': rawStt}),
+        body: jsonEncode({
+          'stt_text': rawStt,
+          'lecture_id': currentLectureId,
+        }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final cleaned = data['cleaned_text'] as String?;
+        final cleaned = (data['cleaned_transcript'] ?? data['content']) as String?;
 
-        setState(() {
-          _cleanedTranscript = cleaned;
-        });
-
-        // 화면 객체 및 DB에 동시 저장하여 영구 유지
-        widget.noteData['cleaned_transcript'] = cleaned;
-        await _updateLectureInDb({'cleaned_transcript': cleaned});
+        if (cleaned != null && cleaned.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _cleanedTranscript = cleaned;
+            });
+          }
+          widget.noteData['cleaned_transcript'] = cleaned;
+          await _updateLectureInDb({'cleaned_transcript': cleaned});
+        }
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -714,46 +839,53 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         );
       }
     } finally {
+      widget.noteData['is_loading_stt'] = false;
       if (mounted) {
         setState(() => _isLoadingCleanSTT = false);
       }
     }
   }
 
-  // 2. 5대 맞춤 노트 생성 요청 및 DB 자동 저장
+  // 2. 5대 맞춤 노트 생성 요청
   Future<void> _fetchCustomFormat(String formatType) async {
+    final stt = widget.noteData['stt_text'] ??
+        widget.noteData['transcript'] ??
+        widget.noteData['summary'] ??
+        '';
+
+    if (stt.isEmpty) return;
+
     setState(() {
       _selectedFormat = formatType;
       _isLoadingFormat = true;
+      widget.noteData['is_loading_format'] = true;
     });
 
     try {
       final baseUrl = ApiConfig.baseUrl;
-      final stt = widget.noteData['stt_text'] ??
-          widget.noteData['transcript'] ??
-          widget.noteData['summary'] ??
-          '';
-
       final response = await http.post(
         Uri.parse('$baseUrl/notes/generate-custom'),
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
         body: jsonEncode({
           'stt_text': stt,
           'format_type': formatType,
+          'lecture_id': widget.noteData['id'] ?? widget.noteData['lecture_id'],
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final content = data['content'] as String?;
+        final content = (data['custom_note'] ?? data['content']) as String?;
 
-        setState(() {
-          _generatedCustomContent = content;
-        });
-
-        // 화면 객체 및 DB에 동시 저장하여 영구 유지
-        widget.noteData['custom_note'] = content;
-        await _updateLectureInDb({'custom_note': content});
+        if (content != null && content.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _generatedCustomContent = content;
+            });
+          }
+          widget.noteData['custom_note'] = content;
+          await _updateLectureInDb({'custom_note': content});
+        }
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -768,6 +900,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         );
       }
     } finally {
+      widget.noteData['is_loading_format'] = false;
       if (mounted) {
         setState(() => _isLoadingFormat = false);
       }
@@ -797,9 +930,14 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                 final info = entry.value;
                 return ListTile(
                   leading: Icon(info['icon'] as IconData, color: Colors.indigo),
-                  title: Text(info['title'] as String,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(info['desc'] as String, style: const TextStyle(fontSize: 12)),
+                  title: Text(
+                    info['title'] as String,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    info['desc'] as String,
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   onTap: () {
                     Navigator.pop(context);
                     _fetchCustomFormat(key);
@@ -813,48 +951,59 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     );
   }
 
-  String _formatDetailedSummary(dynamic detailedData) {
-    if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
+String _formatDetailedSummary(dynamic detailedData) {
+  if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
 
-    if (detailedData is String) {
-      final trimmed = detailedData.trim();
-      return trimmed.isNotEmpty ? trimmed : '세부 강의 노트 내용이 없습니다.';
-    }
-
-    if (detailedData is List) {
-      if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
-
-      final buffer = StringBuffer();
-
-      for (var item in detailedData) {
-        if (item is Map) {
-          final title = item['title'] ?? item['topic'] ?? item['header'] ?? '주요 소주제';
-          buffer.writeln('### 📌 $title\n');
-
-          if (item['points'] != null && item['points'] is List) {
-            final List points = item['points'];
-            for (var pt in points) {
-              buffer.writeln('• ${pt.toString()}');
-            }
-            buffer.writeln('');
-          } else if (item['content'] != null || item['description'] != null) {
-            final content = item['content'] ?? item['description'] ?? '';
-            buffer.writeln('$content\n');
-          } else {
-            buffer.writeln('*상세 설명이 제공되지 않았습니다.*\n');
-          }
-
-          buffer.writeln('---\n');
-        } else if (item is String) {
-          buffer.writeln('• $item\n');
-        }
-      }
-
-      return buffer.toString().trim();
-    }
-
-    return detailedData.toString();
+  // 1. 단순 String으로 들어올 경우 (줄바꿈 및 불렛 기호 정제)
+  if (detailedData is String) {
+    final trimmed = detailedData.trim();
+    if (trimmed.isEmpty) return '세부 강의 노트 내용이 없습니다.';
+    
+    // • 기호 뒤에 줄바꿈이 안 되어있다면 마크다운 불렛 리스트(- ) 형식으로 변경 및 줄바꿈 강화
+    return trimmed
+        .replaceAll('• ', '\n- ')
+        .replaceAll('복소 평면', '\n복소 평면') // 필요시 추가적인 구분을 위한 정제
+        .trim();
   }
+
+  // 2. List 형태로 들어올 경우
+  if (detailedData is List) {
+    if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
+
+    final buffer = StringBuffer();
+
+    for (var item in detailedData) {
+      if (item is Map) {
+        final title = item['title'] ?? item['topic'] ?? item['header'] ?? '주요 소주제';
+        buffer.writeln('### 📌 $title\n');
+
+        if (item['points'] != null && item['points'] is List) {
+          final List points = item['points'];
+          for (var pt in points) {
+            // 💡 마크다운 불렛 리스트 인식 핵심: '- 내용' 형태로 바꾸고 \n\n 두 번 개행
+            buffer.writeln('- ${pt.toString()}\n'); 
+          }
+          buffer.writeln('');
+        } else if (item['content'] != null || item['description'] != null) {
+          final content = item['content'] ?? item['description'] ?? '';
+          buffer.writeln('$content\n\n');
+        } else {
+          buffer.writeln('*상세 설명이 제공되지 않았습니다.*\n\n');
+        }
+
+        buffer.writeln('---\n');
+      } else if (item is String) {
+        // 단일 문자열 불렛 항목들일 경우
+        final cleanedItem = item.replaceAll('• ', '').trim();
+        buffer.writeln('- $cleanedItem\n');
+      }
+    }
+
+    return buffer.toString().trim();
+  }
+
+  return detailedData.toString();
+}
 
   @override
   Widget build(BuildContext context) {
@@ -893,9 +1042,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         child: IndexedStack(
           index: _currentTabIndex,
           children: [
-            // ==========================================
-            // 0️⃣ STT 스크립트 (가독성 정제본 / 원문 토글)
-            // ==========================================
+            // 0️⃣ STT 스크립트
             Column(
               children: [
                 SegmentedButton<int>(
@@ -937,7 +1084,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                               child: SelectableText(
                                 sttRawText,
                                 style: const TextStyle(
-                                    fontSize: 15, height: 1.7, color: Colors.black87),
+                                  fontSize: 15, height: 1.7, color: Colors.black87),
                               ),
                             )
                           : _isLoadingCleanSTT
@@ -987,9 +1134,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
               ],
             ),
 
-            // ==========================================
             // 1️⃣ 세부 강의노트
-            // ==========================================
             SingleChildScrollView(
               child: Card(
                 elevation: 0,
@@ -1012,9 +1157,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
               ),
             ),
 
-            // ==========================================
             // 2️⃣ ✨ 5대 AI 맞춤 정리노트
-            // ==========================================
             _isLoadingFormat
                 ? const Center(
                     child: Column(
@@ -1022,8 +1165,10 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                       children: [
                         CircularProgressIndicator(),
                         SizedBox(height: 16),
-                        Text('AI가 맞춤 노트를 생성하고 있습니다...',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                        Text(
+                          'AI가 맞춤 노트를 생성하고 있습니다...',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
                       ],
                     ),
                   )
@@ -1051,8 +1196,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.indigo,
                                 foregroundColor: Colors.white,
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                               ),
                             ),
                           ],

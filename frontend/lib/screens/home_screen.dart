@@ -701,9 +701,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-// ===========================================================================
-// 🕒 [여기서부터 복사] 시간 검증 헬퍼 함수들을 바로 여기에 넣으세요!
-// ===========================================================================
   int _timeOfDayToMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
 
   int _stringTimeToMinutes(String timeStr) {
@@ -713,7 +710,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String? _validateSchedules(List<CourseScheduleItem> schedules, {int? currentEditingSubjectId}) {
-    // 1️⃣ 시작/종료 시간 역전 검사 (2번 요구사항)
+    // 시작/종료 시간 역전 검사 (2번 요구사항)
     for (int i = 0; i < schedules.length; i++) {
       final item = schedules[i];
       final startMin = _timeOfDayToMinutes(item.startTime);
@@ -724,7 +721,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // 2️⃣ 한 과목 내에서 추가한 여러 일정 간의 중복 검사
+    // 한 과목 내에서 추가한 여러 일정 간의 중복 검사
     for (int i = 0; i < schedules.length; i++) {
       for (int j = i + 1; j < schedules.length; j++) {
         if (schedules[i].day == schedules[j].day) {
@@ -740,7 +737,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // 3️⃣ 기존 등록된 다른 과목들과의 중복 검사 (1번 요구사항)
+    // 기존 등록된 다른 과목들과의 중복 검사 
     final currentSubjects = context.read<SubjectProvider>().subjects;
     for (final newSch in schedules) {
       final newStart = _timeOfDayToMinutes(newSch.startTime);
@@ -952,31 +949,54 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------------------------------------
   // 📑 AI 상세 요약 모달 (📌 세부 강의 내용 포함)
   // ---------------------------------------------------------------------------
-  void _showNoteDetailModal(Map<String, dynamic> note) {
-    final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
-    final String summary = note['summary'] ?? '요약 내용이 없습니다.';
-    final String transcript = note['transcript'] ??
-        note['stt_transcript'] ??
-        'STT 음성 변환 기록이 없습니다.';
+void _showNoteDetailModal(Map<String, dynamic> note) {
+  // 1. 중첩된 detail 객체가 있을 경우를 대비한 데이터 참조
+  final Map<String, dynamic> data = (note['detail'] is Map<String, dynamic>)
+      ? note['detail']
+      : (note['data'] is Map<String, dynamic> ? note['data'] : note);
 
-    List<dynamic> keywords = [];
-    if (note['keywords'] is List) {
-      keywords = note['keywords'];
-    } else if (note['key_concepts'] is List) {
-      keywords = note['key_concepts'];
-    }
+  final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
 
-    // 세부 요약 항목 추출 (백엔드 필드명 호환성 강화)
-    List<dynamic> detailedSummary = [];
-    if (note['detailed_summary'] is List) {
-      detailedSummary = note['detailed_summary'];
-    } else if (note['detail_summary'] is List) {
-      detailedSummary = note['detail_summary'];
-    } else if (note['details'] is List) {
-      detailedSummary = note['details'];
-    } else if (note['bullet_points'] is List) {
-      detailedSummary = note['bullet_points'];
-    }
+  // 2. 핵심 요약 키값 유연화 (ai_summary, overview 등 추가)
+  final String summary = (data['summary'] ??
+          data['ai_summary'] ??
+          data['overview'] ??
+          note['summary'] ??
+          '요약 내용이 없습니다.')
+      .toString();
+
+  // 3. STT 원문 키값 유연화
+  final String transcript = (data['transcript'] ??
+          data['stt_transcript'] ??
+          note['transcript'] ??
+          note['stt_transcript'] ??
+          'STT 음성 변환 기록이 없습니다.')
+      .toString();
+
+  // 4. 키워드 추출 유연화 (List 혹은 Comma 구분 String 대응)
+  List<dynamic> keywords = [];
+  final rawKeywords = data['keywords'] ?? data['key_concepts'] ?? note['keywords'] ?? note['key_concepts'];
+  if (rawKeywords is List) {
+    keywords = rawKeywords;
+  } else if (rawKeywords is String && rawKeywords.isNotEmpty) {
+    keywords = rawKeywords.split(',').map((e) => e.trim()).toList();
+  }
+
+  // 5. 세부 요약 항목 추출 (sections, contents 등 키값 추가 탐색)
+  List<dynamic> detailedSummary = [];
+  final rawDetails = data['detailed_summary'] ??
+      data['detail_summary'] ??
+      data['details'] ??
+      data['bullet_points'] ??
+      data['sections'] ??
+      note['detailed_summary'] ??
+      note['detail_summary'] ??
+      note['details'] ??
+      note['bullet_points'];
+
+  if (rawDetails is List) {
+    detailedSummary = rawDetails;
+  }
 
     showModalBottomSheet(
       context: context,
