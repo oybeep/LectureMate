@@ -176,21 +176,31 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _fetchNotesForSubject(int subjectId) async {
+Future<void> _fetchNotesForSubject(int subjectId) async {
     setState(() {
       isLoadingNotes = true;
     });
+
     try {
-      final response =
-          await http.get(Uri.parse('$baseUrl/lectures/subject/$subjectId'));
+      final response = await http.get(Uri.parse('$baseUrl/lectures/subject/$subjectId'));
+      
+      // 💡 터미널에서 백엔드 응답 확인용 (디버깅)
+      print('=== 노트 조회 API 응답 ===');
+      print('상태 코드: ${response.statusCode}');
+      print('응답 본문: ${utf8.decode(response.bodyBytes)}');
+
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+        
         setState(() {
-          lectureNotes = data;
+          // 🚨 수정된 부분: lectureNotes -> notes 로 변경
+          // (이전에 보여주신 UI 코드가 notes 변수를 참조하고 있기 때문입니다)
+          notes = data; 
         });
       }
     } catch (e) {
       _showFeedbackSnackBar('노트 불러오기 실패: $e', isError: true);
+      print('노트 조회 에러: $e'); // 에러 내용 터미널 출력
     } finally {
       setState(() {
         isLoadingNotes = false;
@@ -491,7 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
   // ✨ 과목 추가 다이얼로그
   // ---------------------------------------------------------------------------
   void _showAddSubjectDialog(BuildContext context) async {
@@ -774,6 +784,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 // ---------------------------------------------------------------------------
+  // 🔍 [추가] 단건 노트 상세 조회 헬퍼 메서드
+  // ---------------------------------------------------------------------------
+  Future<Map<String, dynamic>?> _fetchSingleNoteDetail(int noteId) async {
+    try {
+      // 백엔드 단건 조회 API 호출 (경로가 다를 경우 프로젝트에 맞게 수정)
+      final response = await http.get(Uri.parse('$baseUrl/notes/$noteId'));
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(utf8.decode(response.bodyBytes));
+      }
+    } catch (e) {
+      print("노트 상세 조회 중 오류 발생: $e");
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
   // 🎙️ 음성 파일 업로드 및 녹음 제어 메서드
   // ---------------------------------------------------------------------------
   Future<void> _uploadAudioFile() async {
@@ -782,11 +809,10 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // FilePicker 호출 (platform 속성 없이 FilePicker.pickFiles 호출)
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['mp3', 'm4a', 'wav', 'aac', 'flac'],
-      withData: true, // Web 지원을 위해 바이트 데이터 로드
+      withData: true,
     );
 
     if (result != null && result.files.isNotEmpty) {
@@ -795,7 +821,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() {
         isProcessing = true;
-        processStatus = '음성 파일 전송 중...';
+        processStatus = '음성 파일 전송 및 AI 분석 중...';
       });
 
       try {
@@ -806,9 +832,7 @@ class _HomeScreenState extends State<HomeScreen> {
         request.fields['subject_id'] = selectedSubjectId.toString();
         request.fields['title'] = fileName;
 
-        // Web 환경과 Mobile/Desktop 환경 분기 처리
         if (file.bytes != null) {
-          // Web (Chrome) 환경: Byte 데이터 사용
           request.files.add(
             http.MultipartFile.fromBytes(
               'file',
@@ -817,7 +841,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           );
         } else if (file.path != null) {
-          // Mobile/Desktop 환경: Path 사용
           request.files.add(
             await http.MultipartFile.fromPath('file', file.path!),
           );
@@ -828,18 +851,32 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (response.statusCode == 200 || response.statusCode == 201) {
           final resData = jsonDecode(utf8.decode(response.bodyBytes));
+          
+          // 1. 생성된 노트 ID 추출
+          final int? noteId = resData['note_id'] ?? resData['id'];
+
+          // 2. 전체 과목 노트 목록 새로고침
+          await _fetchNotesForSubject(selectedSubjectId!);
+
+          // 3. 최신 요약 정보가 담긴 단건 노트를 재조회하여 반영
+          Map<String, dynamic>? fullNoteData;
+          if (noteId != null) {
+            fullNoteData = await _fetchSingleNoteDetail(noteId) ?? resData;
+          } else {
+            fullNoteData = resData;
+          }
+
           setState(() {
-            latestNoteData = resData;
+            latestNoteData = fullNoteData; // 요약 데이터가 포함된 최신 객체 할당
             processStatus = '✨ AI 노트 생성 완료!';
           });
+
           _showFeedbackSnackBar('✨ AI 노트 생성이 완료되었습니다!');
-          _fetchNotesForSubject(selectedSubjectId!);
         } else {
           setState(() {
             processStatus = '노트 생성 실패 (${response.statusCode})';
           });
-          _showFeedbackSnackBar('파일 업로드 실패 (${response.statusCode})',
-              isError: true);
+          _showFeedbackSnackBar('파일 업로드 실패 (${response.statusCode})', isError: true);
         }
       } catch (e) {
         setState(() {
@@ -891,12 +928,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (response.statusCode == 200 || response.statusCode == 201) {
             final resData = jsonDecode(utf8.decode(response.bodyBytes));
+            
+            // 1. 생성된 노트 ID 추출
+            final int? noteId = resData['note_id'] ?? resData['id'];
+
+            // 2. 전체 과목 노트 목록 새로고침
+            await _fetchNotesForSubject(selectedSubjectId!);
+
+            // 3. 최신 요약 정보가 담긴 단건 노트를 재조회하여 반영
+            Map<String, dynamic>? fullNoteData;
+            if (noteId != null) {
+              fullNoteData = await _fetchSingleNoteDetail(noteId) ?? resData;
+            } else {
+              fullNoteData = resData;
+            }
+
             setState(() {
-              latestNoteData = resData;
+              latestNoteData = fullNoteData; // 요약 데이터가 포함된 최신 객체 할당
               processStatus = '✨ AI 노트 생성 완료!';
             });
+
             _showFeedbackSnackBar('✨ 녹음본 AI 노트 생성이 완료되었습니다!');
-            _fetchNotesForSubject(selectedSubjectId!);
           } else {
             _showFeedbackSnackBar('녹음 분석 실패 (${response.statusCode})',
                 isError: true);
@@ -949,54 +1001,57 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------------------------------------
   // 📑 AI 상세 요약 모달 (📌 세부 강의 내용 포함)
   // ---------------------------------------------------------------------------
-void _showNoteDetailModal(Map<String, dynamic> note) {
-  // 1. 중첩된 detail 객체가 있을 경우를 대비한 데이터 참조
-  final Map<String, dynamic> data = (note['detail'] is Map<String, dynamic>)
-      ? note['detail']
-      : (note['data'] is Map<String, dynamic> ? note['data'] : note);
+  void _showNoteDetailModal(Map<String, dynamic> note) {
+    // 1. 중첩된 detail 객체가 있을 경우를 대비한 데이터 참조
+    final Map<String, dynamic> data = (note['detail'] is Map<String, dynamic>)
+        ? note['detail']
+        : (note['data'] is Map<String, dynamic> ? note['data'] : note);
 
-  final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
+    final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
 
-  // 2. 핵심 요약 키값 유연화 (ai_summary, overview 등 추가)
-  final String summary = (data['summary'] ??
-          data['ai_summary'] ??
-          data['overview'] ??
-          note['summary'] ??
-          '요약 내용이 없습니다.')
-      .toString();
+    // 2. 핵심 요약 키값 유연화 (ai_summary, overview 등 추가)
+    final String summary = (data['summary'] ??
+            data['ai_summary'] ??
+            data['overview'] ??
+            note['summary'] ??
+            '요약 내용이 없습니다.')
+        .toString();
 
-  // 3. STT 원문 키값 유연화
-  final String transcript = (data['transcript'] ??
-          data['stt_transcript'] ??
-          note['transcript'] ??
-          note['stt_transcript'] ??
-          'STT 음성 변환 기록이 없습니다.')
-      .toString();
+    // 3. STT 원문 키값 유연화
+    final String transcript = (data['transcript'] ??
+            data['stt_transcript'] ??
+            note['transcript'] ??
+            note['stt_transcript'] ??
+            'STT 음성 변환 기록이 없습니다.')
+        .toString();
 
-  // 4. 키워드 추출 유연화 (List 혹은 Comma 구분 String 대응)
-  List<dynamic> keywords = [];
-  final rawKeywords = data['keywords'] ?? data['key_concepts'] ?? note['keywords'] ?? note['key_concepts'];
-  if (rawKeywords is List) {
-    keywords = rawKeywords;
-  } else if (rawKeywords is String && rawKeywords.isNotEmpty) {
-    keywords = rawKeywords.split(',').map((e) => e.trim()).toList();
-  }
+    // 4. 키워드 추출 유연화 (List 혹은 Comma 구분 String 대응)
+    List<dynamic> keywords = [];
+    final rawKeywords = data['keywords'] ??
+        data['key_concepts'] ??
+        note['keywords'] ??
+        note['key_concepts'];
+    if (rawKeywords is List) {
+      keywords = rawKeywords;
+    } else if (rawKeywords is String && rawKeywords.isNotEmpty) {
+      keywords = rawKeywords.split(',').map((e) => e.trim()).toList();
+    }
 
-  // 5. 세부 요약 항목 추출 (sections, contents 등 키값 추가 탐색)
-  List<dynamic> detailedSummary = [];
-  final rawDetails = data['detailed_summary'] ??
-      data['detail_summary'] ??
-      data['details'] ??
-      data['bullet_points'] ??
-      data['sections'] ??
-      note['detailed_summary'] ??
-      note['detail_summary'] ??
-      note['details'] ??
-      note['bullet_points'];
+    // 5. 세부 요약 항목 추출 (sections, contents 등 키값 추가 탐색)
+    List<dynamic> detailedSummary = [];
+    final rawDetails = data['detailed_summary'] ??
+        data['detail_summary'] ??
+        data['details'] ??
+        data['bullet_points'] ??
+        data['sections'] ??
+        note['detailed_summary'] ??
+        note['detail_summary'] ??
+        note['details'] ??
+        note['bullet_points'];
 
-  if (rawDetails is List) {
-    detailedSummary = rawDetails;
-  }
+    if (rawDetails is List) {
+      detailedSummary = rawDetails;
+    }
 
     showModalBottomSheet(
       context: context,
@@ -1110,7 +1165,8 @@ void _showNoteDetailModal(Map<String, dynamic> note) {
                                       padding: const EdgeInsets.all(14),
                                       decoration: BoxDecoration(
                                         color: Colors.grey.shade50,
-                                        borderRadius: BorderRadius.circular(10),
+                                        borderRadius:
+                                            BorderRadius.circular(10),
                                       ),
                                       child: const Text(
                                         '세부 강의 내용이 없습니다.',
@@ -1118,35 +1174,52 @@ void _showNoteDetailModal(Map<String, dynamic> note) {
                                       ),
                                     )
                                   : Column(
-                                      children: detailedSummary.asMap().entries.map<Widget>((entry) {
+                                      children: detailedSummary
+                                          .asMap()
+                                          .entries
+                                          .map<Widget>((entry) {
                                         final int index = entry.key + 1;
                                         final item = entry.value;
 
                                         // 1️⃣ Map 형태 (title + points/subpoints 구조)
                                         if (item is Map) {
-                                          final String subTitle = item['title'] ?? item['topic'] ?? '주제 $index';
+                                          final String subTitle =
+                                              item['title'] ??
+                                                  item['topic'] ??
+                                                  '주제 $index';
                                           List<dynamic> points = [];
                                           if (item['points'] is List) {
                                             points = item['points'];
-                                          } else if (item['descriptions'] is List) {
+                                          } else if (item['descriptions']
+                                              is List) {
                                             points = item['descriptions'];
-                                          } else if (item['explanation'] != null) {
-                                            points = [item['explanation'].toString()];
+                                          } else if (item['explanation'] !=
+                                              null) {
+                                            points = [
+                                              item['explanation'].toString()
+                                            ];
                                           }
 
                                           return Container(
-                                            margin: const EdgeInsets.only(bottom: 12),
+                                            margin: const EdgeInsets.only(
+                                                bottom: 12),
                                             padding: const EdgeInsets.all(14),
                                             decoration: BoxDecoration(
-                                              color: Colors.indigo.shade50.withOpacity(0.4),
-                                              borderRadius: BorderRadius.circular(12),
-                                              border: Border.all(color: Colors.indigo.shade100),
+                                              color: Colors.indigo.shade50
+                                                  .withOpacity(0.4),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                  color:
+                                                      Colors.indigo.shade100),
                                             ),
                                             child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
                                                 Row(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
                                                   children: [
                                                     const Icon(
                                                       Icons.check_circle_rounded,
@@ -1159,7 +1232,8 @@ void _showNoteDetailModal(Map<String, dynamic> note) {
                                                         '$index. $subTitle',
                                                         style: const TextStyle(
                                                           fontSize: 15,
-                                                          fontWeight: FontWeight.bold,
+                                                          fontWeight:
+                                                              FontWeight.bold,
                                                           color: Colors.indigo,
                                                         ),
                                                       ),
@@ -1169,20 +1243,42 @@ void _showNoteDetailModal(Map<String, dynamic> note) {
                                                 if (points.isNotEmpty) ...[
                                                   const SizedBox(height: 8),
                                                   Padding(
-                                                    padding: const EdgeInsets.only(left: 28.0),
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            left: 28.0),
                                                     child: Column(
-                                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                                      children: points.map<Widget>((p) {
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: points
+                                                          .map<Widget>((p) {
                                                         return Padding(
-                                                          padding: const EdgeInsets.only(bottom: 4.0),
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  bottom: 4.0),
                                                           child: Row(
-                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
                                                             children: [
-                                                              const Text('• ', style: TextStyle(color: Colors.black54, fontWeight: FontWeight.bold)),
+                                                              const Text('• ',
+                                                                  style: TextStyle(
+                                                                      color: Colors
+                                                                          .black54,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold)),
                                                               Expanded(
                                                                 child: Text(
                                                                   p.toString(),
-                                                                  style: const TextStyle(fontSize: 13.5, height: 1.4, color: Colors.black87),
+                                                                  style: const TextStyle(
+                                                                      fontSize:
+                                                                          13.5,
+                                                                      height:
+                                                                          1.4,
+                                                                      color: Colors
+                                                                          .black87),
                                                                 ),
                                                               ),
                                                             ],
@@ -1199,15 +1295,20 @@ void _showNoteDetailModal(Map<String, dynamic> note) {
 
                                         // 2️⃣ 기존 단순 텍스트 형태 호환
                                         return Container(
-                                          margin: const EdgeInsets.only(bottom: 8),
+                                          margin:
+                                              const EdgeInsets.only(bottom: 8),
                                           padding: const EdgeInsets.all(12),
                                           decoration: BoxDecoration(
-                                            color: Colors.indigo.shade50.withOpacity(0.4),
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: Colors.indigo.shade100),
+                                            color: Colors.indigo.shade50
+                                                .withOpacity(0.4),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            border: Border.all(
+                                                color: Colors.indigo.shade100),
                                           ),
                                           child: Row(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               const Icon(
                                                 Icons.check_circle_rounded,
@@ -1572,7 +1673,18 @@ void _showNoteDetailModal(Map<String, dynamic> note) {
                             const Icon(Icons.chevron_right),
                           ],
                         ),
-                        onTap: () => _showNoteDetailModal(note),
+                        onTap: () async {
+                          // 1. noteId 추출
+                          final int noteId = int.parse((note['id'] ?? note['lecture_id'] ?? note['note_id']).toString());
+  
+                          // 2. 단건 조회 API를 통해 요약문 및 STT 원문이 포함된 전체 데이터 가져오기
+                          final fullNote = await _fetchSingleNoteDetail(noteId);
+
+                          // 3. 전체 데이터가 있으면 fullNote 전달, 실패 시 기본 note 전달
+                          if (mounted) {
+                            _showNoteDetailModal(fullNote ?? note);
+  }
+},
                       ),
                     );
                   },
