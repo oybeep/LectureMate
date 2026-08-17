@@ -25,17 +25,14 @@ class AISummaryService:
             "2. detailed_summary: 강의에서 다룬 핵심 소주제별 세부 정리 리스트\n"
             "   - 각 소주제 객체 구조:\n"
             "     {\n"
-            "       \"title\": \"📌 [소주제명]\",\n"
-            "       \"details\": [\n"
-            "         \"첫 번째 세부 설명 문장\",\n"
-            "         \"두 번째 세부 설명 문장\",\n"
-            "         \"세 번째 세부 설명 문장\"\n"
+            '       "title": "📌 [소주제명]",\n'
+            '       "details": [\n'
+            '         "첫 번째 세부 설명 문장",\n'
+            '         "두 번째 세부 설명 문장"\n'
             "       ]\n"
             "     }\n"
-            "   - ⚠️ [필수 규칙] 'details' 배열 내의 문장들을 절대로 가운데 점(•)이나 기호를 사용해 한 줄로 이어 붙이지 마세요.\n"
-            "   - 각 세부 문장은 반드시 하나씩 완전하게 분리된 배열(List) 원소(String)로 작성해야 합니다.\n"
             "3. key_concepts: 강의를 대표하는 핵심 용어 및 개념 키워드 리스트\n"
-            "4. quiz_questions: 복습용 객관식 퀴즈 리스트 (question, options, answer_index, answer, explanation)\n\n"
+            "4. quiz_questions: 복습용 객관식 퀴즈 리스트\n\n"
             "반드시 Valid JSON 객체만 반환해 주세요."
         )
 
@@ -56,18 +53,22 @@ class AISummaryService:
             parsed_data = json.loads(result_text)
 
             # ------------------------------------------------------------------
-            # 💡 [후처리] 혹시라도 details 내부나 points에 '•'로 뭉쳐진 경우 분리 보완
+            # 💡 [호환성 보완] 프론트엔드가 사용하는 다양한 키 이름 호환 처리
             # ------------------------------------------------------------------
+            # 1. 키워드 필드명 호환 (key_concepts ↔ keywords)
+            keywords = parsed_data.get("key_concepts") or parsed_data.get("keywords") or []
+            parsed_data["key_concepts"] = keywords
+            parsed_data["keywords"] = keywords  # 프론트엔드용 추가
+
+            # 2. 세부 요약 후처리 및 호환
             if "detailed_summary" in parsed_data and isinstance(parsed_data["detailed_summary"], list):
                 sanitized_detailed = []
                 for item in parsed_data["detailed_summary"]:
                     if isinstance(item, dict):
-                        # details 또는 points 키 호환
                         raw_details = item.get("details") or item.get("points") or []
                         cleaned_details = []
 
                         if isinstance(raw_details, str):
-                            # 문자열로 들어온 경우 '•' 또는 줄바꿈으로 분리
                             split_items = re.split(r"[•\n]+", raw_details)
                             cleaned_details = [s.strip() for s in split_items if s.strip()]
                         elif isinstance(raw_details, list):
@@ -83,7 +84,7 @@ class AISummaryService:
                         sanitized_detailed.append({
                             "title": item.get("title", "📌 주요 내용"),
                             "details": cleaned_details,
-                            "points": cleaned_details  # 앱 호환성을 위해 둘 다 저장
+                            "points": cleaned_details
                         })
                 parsed_data["detailed_summary"] = sanitized_detailed
 

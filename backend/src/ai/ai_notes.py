@@ -1,13 +1,15 @@
 import os
+import re
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from openai import AsyncOpenAI
+from sqlalchemy.orm import Session
 
 # DB 및 모델 모듈
 import models
-from database import SessionLocal
+from database import SessionLocal, get_db
 
 load_dotenv()  # .env 로드
 
@@ -88,26 +90,36 @@ PROMPT_TEMPLATES = {
 
 # ---------------------------------------------------------------------------
 # 요청 / 응답 모델
-# 💡 Optional[int] = None 으로 변경하여 Flutter에서 lecture_id를 안 보내도 422 에러가 나지 않음
 # ---------------------------------------------------------------------------
 class CustomFormatRequest(BaseModel):
     stt_text: str
-    format_type: str                   # cornell, exam, outline, flashcard, feynman
-    lecture_id: Optional[int] = None   # 선택적 입력 처리
+    format_type: str                    # cornell, exam, outline, flashcard, feynman
+    lecture_id: Optional[int] = None    # 선택적 입력 처리
 
 class CleanSTTRequest(BaseModel):
     stt_text: str
-    lecture_id: Optional[int] = None   # 선택적 입력 처리
+    lecture_id: Optional[int] = None    # 선택적 입력 처리
 
 
 # ---------------------------------------------------------------------------
-# ⚙️ 백그라운드 AI 처리 함수 (사용자가 화면을 나가도 끝까지 동작함)
+# API 엔드포인트
 # ---------------------------------------------------------------------------
-async def task_generate_custom_note(lecture_id: Optional[int], format_type: str, stt_text: str):
-    db = SessionLocal()
+
+# 1. 5대 맞춤 학습노트 생성 (즉시 결과 반환)
+@router.post("/generate-custom")
+async def generate_custom_note(
+    req: CustomFormatRequest, 
+    db: Session = Depends(get_db)
+):
+    if req.format_type not in PROMPT_TEMPLATES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 노트 형식입니다: {req.format_type}")
+
+    if not req.stt_text or req.stt_text.strip() == "":
+        raise HTTPException(status_code=400, detail="STT 텍스트가 비어 있습니다.")
+
     try:
-        system_prompt = PROMPT_TEMPLATES[format_type]
-        user_content = f"--- [강의 내용 / STT 원문] ---\n{stt_text}"
+        system_prompt = PROMPT_TEMPLATES[req.format_type]
+        user_content = f"--- [강의 내용 / STT 원문] ---\n{req.stt_text}"
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
@@ -119,24 +131,40 @@ async def task_generate_custom_note(lecture_id: Optional[int], format_type: str,
         )
         result_content = response.choices[0].message.content
 
-        # lecture_id가 넘어온 경우 DB에 자동 저장
-        if lecture_id:
-            lecture = db.query(models.Lecture).filter(models.Lecture.id == lecture_id).first()
+        # lecture_id가 함께 전달된 경우 DB 자동 저장
+        if req.lecture_id:
+            lecture = db.query(models.Lecture).filter(models.Lecture.id == req.lecture_id).first()
             if lecture:
                 lecture.custom_note = result_content
                 db.commit()
-                print(f"✅ [백그라운드 완료] Lecture ID={lecture_id} | 맞춤노트({format_type}) DB 저장 완료")
+                print(f"✅ Lecture ID={req.lecture_id} | 맞춤노트({req.format_type}) DB 저장 완료")
+            else:
+                print(f"⚠️ Lecture ID={req.lecture_id} 해당 강의를 찾을 수 없습니다.")
         else:
-            print(f"✅ [백그라운드 완료] 맞춤노트({format_type}) 생성 완료 (lecture_id 없음, DB 미저장)")
+            print(f"ℹ️ lecture_id 미전달 | 맞춤노트({req.format_type}) 생성 후 즉시 응답만 반환")
+
+        return {
+            "status": "success",
+            "content": result_content,
+            "custom_note": result_content,
+            "format_type": req.format_type,
+            "lecture_id": req.lecture_id
+        }
 
     except Exception as e:
-        print(f"❌ [백그라운드 맞춤노트 생성 실패]: {e}")
-    finally:
-        db.close()
+        print(f"❌ [맞춤노트 생성 실패]: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 노트 생성 중 오류가 발생했습니다: {str(e)}")
 
 
-async def task_clean_stt_transcript(lecture_id: Optional[int], stt_text: str):
-    db = SessionLocal()
+# 2. STT 가독성 정제본 생성 (즉시 결과 반환)
+@router.post("/clean-stt")
+async def clean_stt_transcript(
+    req: CleanSTTRequest, 
+    db: Session = Depends(get_db)
+):
+    if not req.stt_text or req.stt_text.strip() == "":
+        raise HTTPException(status_code=400, detail="STT 텍스트가 비어있습니다.")
+
     try:
         system_prompt = """
 당신은 대학 강의 STT 스크립트 전문 윤문 AI입니다.
@@ -154,72 +182,31 @@ async def task_clean_stt_transcript(lecture_id: Optional[int], stt_text: str):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"--- [원문 STT 텍스트] ---\n{stt_text}"}
+                {"role": "user", "content": f"--- [원문 STT 텍스트] ---\n{req.stt_text}"}
             ],
             temperature=0.2,
         )
         cleaned_text = response.choices[0].message.content
 
-        # lecture_id가 넘어온 경우 DB에 자동 저장
-        if lecture_id:
-            lecture = db.query(models.Lecture).filter(models.Lecture.id == lecture_id).first()
+        # lecture_id가 함께 전달된 경우 DB 자동 저장
+        if req.lecture_id:
+            lecture = db.query(models.Lecture).filter(models.Lecture.id == req.lecture_id).first()
             if lecture:
                 lecture.cleaned_transcript = cleaned_text
                 db.commit()
-                print(f"✅ [백그라운드 완료] Lecture ID={lecture_id} | STT 정제본 DB 저장 완료")
+                print(f"✅ Lecture ID={req.lecture_id} | STT 정제본 DB 저장 완료")
+            else:
+                print(f"⚠️ Lecture ID={req.lecture_id} 해당 강의를 찾을 수 없습니다.")
         else:
-            print("✅ [백그라운드 완료] STT 정제본 생성 완료 (lecture_id 없음, DB 미저장)")
+            print("ℹ️ lecture_id 미전달 | STT 정제본 생성 후 즉시 응답만 반환")
+
+        return {
+            "status": "success",
+            "content": cleaned_text,
+            "cleaned_transcript": cleaned_text,
+            "lecture_id": req.lecture_id
+        }
 
     except Exception as e:
-        print(f"❌ [백그라운드 STT 정제 실패]: {e}")
-    finally:
-        db.close()
-
-
-# ---------------------------------------------------------------------------
-# API 엔드포인트
-# ---------------------------------------------------------------------------
-
-# 1. 5대 맞춤 학습노트 생성 (백그라운드 비동기 처리)
-@router.post("/generate-custom")
-async def generate_custom_note(req: CustomFormatRequest, background_tasks: BackgroundTasks):
-    if req.format_type not in PROMPT_TEMPLATES:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 노트 형식입니다: {req.format_type}")
-
-    if not req.stt_text or req.stt_text.strip() == "":
-        raise HTTPException(status_code=400, detail="STT 텍스트가 비어 있습니다.")
-
-    # 백그라운드 작업으로 등록 (즉시 200 OK 응답 반환)
-    background_tasks.add_task(
-        task_generate_custom_note, 
-        req.lecture_id, 
-        req.format_type, 
-        req.stt_text
-    )
-
-    return {
-        "status": "processing",
-        "message": "AI 맞춤 노트를 백그라운드에서 생성 중입니다.",
-        "lecture_id": req.lecture_id,
-        "format_type": req.format_type
-    }
-
-
-# 2. STT 가독성 정제본 생성 (백그라운드 비동기 처리)
-@router.post("/clean-stt")
-async def clean_stt_transcript(req: CleanSTTRequest, background_tasks: BackgroundTasks):
-    if not req.stt_text or req.stt_text.strip() == "":
-        raise HTTPException(status_code=400, detail="STT 텍스트가 비어있습니다.")
-
-    # 백그라운드 작업으로 등록 (즉시 200 OK 응답 반환)
-    background_tasks.add_task(
-        task_clean_stt_transcript, 
-        req.lecture_id, 
-        req.stt_text
-    )
-
-    return {
-        "status": "processing",
-        "message": "STT 정제 스크립트를 백그라운드에서 생성 중입니다.",
-        "lecture_id": req.lecture_id
-    }
+        print(f"❌ [STT 정제 실패]: {e}")
+        raise HTTPException(status_code=500, detail=f"STT 정제 중 오류가 발생했습니다: {str(e)}")

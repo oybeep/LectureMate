@@ -63,10 +63,14 @@ class QueryRequest(BaseModel):
     query: str
 
 
+# 💡 Flutter에서 들어올 수 있는 다양한 필드명 호환 수용
 class LectureUpdatePayload(BaseModel):
     title: Optional[str] = None
     cleaned_transcript: Optional[str] = None
+    cleaned_stt: Optional[str] = None
+    content: Optional[str] = None
     custom_note: Optional[str] = None
+    custom_content: Optional[str] = None
 
 
 class SubjectUpdatePayload(BaseModel):
@@ -85,6 +89,10 @@ class SummaryRequestPayload(BaseModel):
 # Helper Function
 def format_lecture_response(lecture: models.Lecture, subject_name: str = "") -> Dict[str, Any]:
     created_date = lecture.created_at.strftime("%Y-%m-%d %H:%M") if lecture.created_at else datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    # 💡 요약/퀴즈 존재 여부에 따라 상태 전달 (processing vs completed)
+    is_processed = bool(lecture.summary or lecture.detailed_summary)
+    
     return {
         "id": lecture.id,
         "subject_id": lecture.subject_id,
@@ -94,6 +102,7 @@ def format_lecture_response(lecture: models.Lecture, subject_name: str = "") -> 
         "filename": lecture.title,
         "created_at": created_date,
         "date": created_date,
+        "status": "completed" if is_processed else "processing",
         "transcript": lecture.stt_text or "",
         "stt_transcript": lecture.stt_text or "",
         "stt_text": lecture.stt_text or "",
@@ -126,10 +135,16 @@ async def task_summarize_lecture(lecture_id: int, subject: str, lecture_title: s
         parsed_data = {}
         if ai_result.get("status") == "success" and "raw_response" in ai_result:
             raw_text = ai_result["raw_response"]
-            clean_json = re.sub(r"```json|```", "", raw_text).strip()
-            try:
-                parsed_data = json.loads(clean_json)
-            except Exception:
+            
+            # 💡 정규식으로 가장 외곽의 { ... } JSON 객체만 정확히 추출
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if match:
+                try:
+                    parsed_data = json.loads(match.group(0))
+                except Exception as json_err:
+                    print(f"⚠️ 백그라운드 요약 JSON 파싱 실패: {json_err}")
+                    parsed_data = {}
+            else:
                 parsed_data = {}
 
         summary_text = parsed_data.get("summary", "강의 요약 내용을 성공적으로 생성했습니다.")
@@ -145,7 +160,9 @@ async def task_summarize_lecture(lecture_id: int, subject: str, lecture_title: s
                     raw_opts = item.get("options") or item.get("choices") or []
                     opts = [str(o) for o in raw_opts] if (isinstance(raw_opts, list) and len(raw_opts) >= 2) else [str(item.get("answer", "정답")), "해당하지 않는 내용", "잘못된 개념 설명", "언급되지 않은 조건"]
                     correct_idx = item.get("answer_index")
-                    if correct_idx is None or not isinstance(correct_idx, int):
+                    try: 
+                        correct_idx = int(correct_idx)
+                    except (ValueError, TypeError):
                         try:
                             correct_idx = opts.index(str(item.get("answer", "")))
                         except ValueError:
@@ -387,7 +404,21 @@ def get_single_lecture(lecture_id: int, db: Session = Depends(get_db)):
     return format_lecture_response(lecture, sub_name)
 
 
-# 4-1. 강의 정보 수정 API
+# 💡 프론트엔드 /notes/{note_id} 호환 엔드포인트 (404 해결)
+@app.get("/notes/{note_id}")
+@app.get("/api/notes/{note_id}")
+def get_note_by_id(note_id: int, db: Session = Depends(get_db)):
+    lecture = db.query(models.Lecture).filter(models.Lecture.id == note_id).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail=f"ID가 {note_id}인 노트를 찾을 수 없습니다.")
+
+    subject = db.query(models.Subject).filter(models.Subject.id == lecture.subject_id).first()
+    sub_name = subject.title if subject else ""
+
+    return format_lecture_response(lecture, sub_name)
+
+
+# 4-1. 강의 정보 수정 API (💡 유연한 파라미터 수용 처리)
 @app.patch("/lectures/{lecture_id}")
 @app.patch("/api/lectures/{lecture_id}")
 @app.put("/lectures/{lecture_id}")
@@ -400,11 +431,15 @@ def update_lecture(lecture_id: int, payload: LectureUpdatePayload, db: Session =
     if payload.title is not None and payload.title.strip():
         lecture.title = payload.title.strip()
 
-    if payload.cleaned_transcript is not None:
-        lecture.cleaned_transcript = payload.cleaned_transcript
+    # 💡 cleaned_transcript, cleaned_stt, content 중 존재하는 값을 DB에 업데이트
+    target_cleaned = payload.cleaned_transcript or payload.cleaned_stt or payload.content
+    if target_cleaned is not None:
+        lecture.cleaned_transcript = target_cleaned
 
-    if payload.custom_note is not None:
-        lecture.custom_note = payload.custom_note
+    # 💡 custom_note, custom_content 중 존재하는 값을 DB에 업데이트
+    target_custom = payload.custom_note or payload.custom_content
+    if target_custom is not None:
+        lecture.custom_note = target_custom
 
     db.commit()
     db.refresh(lecture)
@@ -511,7 +546,6 @@ async def summarize_lecture_on_demand(
         "lecture_id": req.lecture_id
     }
 
-
 # 5. 올인원 업로드 엔드포인트
 @app.api_route("/lectures/upload", methods=["POST", "PUT"])
 @app.api_route("/api/lectures/upload", methods=["POST", "PUT"])
@@ -543,12 +577,12 @@ async def handle_audio_upload_universal(
         if audio_bytes and len(audio_bytes) > 20 * 1024 * 1024:
             audio_bytes = await asyncio.to_thread(process_audio_volume, audio_bytes, -16.0)
 
-        # STT 전사 먼저 완료
+        # 1. STT 전사 먼저 완료
         stt_transcript = await stt_service.transcribe_audio_bytes_async(audio_bytes, file_name)
         if not stt_transcript.strip():
             stt_transcript = "음성 파일에서 텍스트를 추출하지 못했습니다."
 
-        # DB에 선작성 등록
+        # 2. DB에 레코드 기본 생성
         new_lecture = models.Lecture(
             subject_id=target_sub_id,
             title=file_name,
@@ -558,19 +592,21 @@ async def handle_audio_upload_universal(
         db.commit()
         db.refresh(new_lecture)
 
-        # 💡 AI 요약 및 Vector 인덱싱 작업은 백그라운드 처리로 넘김
-        background_tasks.add_task(
-            task_summarize_lecture,
+        # 3. 💡 [수정 포인트] 백그라운드가 아닌 동기(await)로 AI 요약 작업이 끝나길 기다림
+        await task_summarize_lecture(
             new_lecture.id,
             selected_subject_name,
             file_name,
             stt_transcript
         )
 
+        # 4. 요약/키워드가 반영된 최신 DB 데이터 다시 불러오기
+        db.refresh(new_lecture)
+
         formatted = format_lecture_response(new_lecture, selected_subject_name)
         return {
             "status": "success",
-            "message": f"'{file_name}' 전사가 완료되었으며 백그라운드에서 AI 요약을 진행합니다.",
+            "message": f"'{file_name}' 전사 및 AI 요약이 성공적으로 완료되었습니다.",
             **formatted
         }
 
