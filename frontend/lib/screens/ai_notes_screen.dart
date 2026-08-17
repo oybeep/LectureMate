@@ -95,10 +95,15 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   void _checkAndStartPolling(int subjectId) {
     _pollingTimer?.cancel();
 
-    bool hasPendingNotes = _notes.any((note) {
-      final summary = note['summary']?.toString().trim();
-      return summary == null || summary.isEmpty || summary == '요약 내용이 없습니다.';
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      if (mounted && _selectedSubjectId == subjectId) {
+        // 로딩 스피너 없이 백그라운드 목록 자동 최신화
+        await _fetchNotesForSubject(subjectId, showLoading: false);
+      } else {
+        timer.cancel();
+      }
     });
+  }
 
     if (hasPendingNotes) {
       _pollingTimer = Timer(const Duration(seconds: 3), () {
@@ -736,14 +741,17 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     _fetchLatestLectureData();
   }
 
-  // 최신 데이터 조회 및 동기화
+// 최신 데이터 조회 및 동기화
   Future<void> _fetchLatestLectureData() async {
     final noteId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
     if (noteId == null) return;
 
     try {
       final baseUrl = ApiConfig.baseUrl;
-      final response = await http.get(Uri.parse('$baseUrl/lectures/$noteId'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/lectures/$noteId'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+      );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
@@ -751,13 +759,15 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
         if (mounted) {
           setState(() {
-            // 생성이 새로 시작된 게 아닐 때만 기존 완성본 업데이트
+            // 로딩 중이 아닐 때만 백엔드 최신 값으로 동기화
             if (!_isLoadingCleanSTT) {
-              _cleanedTranscript = lecture['cleaned_transcript'] ?? _cleanedTranscript;
+              _cleanedTranscript =
+                  lecture['cleaned_transcript'] ?? lecture['cleaned_stt'] ?? _cleanedTranscript;
               widget.noteData['cleaned_transcript'] = _cleanedTranscript;
             }
             if (!_isLoadingFormat) {
-              _generatedCustomContent = lecture['custom_note'] ?? _generatedCustomContent;
+              _generatedCustomContent =
+                  lecture['custom_note'] ?? lecture['custom_content'] ?? _generatedCustomContent;
               widget.noteData['custom_note'] = _generatedCustomContent;
             }
           });
@@ -785,7 +795,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-  // 1. STT 가독성 정제본 요청
+// 1. STT 가독성 정제본 요청
   Future<void> _fetchCleanedSTT() async {
     final rawStt = widget.noteData['stt_text'] ??
         widget.noteData['transcript'] ??
@@ -796,10 +806,12 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
     final currentLectureId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
 
-    setState(() {
-      _isLoadingCleanSTT = true;
-      widget.noteData['is_loading_stt'] = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoadingCleanSTT = true;
+        widget.noteData['is_loading_stt'] = true;
+      });
+    }
 
     try {
       final baseUrl = ApiConfig.baseUrl;
@@ -820,9 +832,9 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
           if (mounted) {
             setState(() {
               _cleanedTranscript = cleaned;
+              widget.noteData['cleaned_transcript'] = cleaned;
             });
           }
-          widget.noteData['cleaned_transcript'] = cleaned;
           await _updateLectureInDb({'cleaned_transcript': cleaned});
         }
       } else {
@@ -839,9 +851,11 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         );
       }
     } finally {
-      widget.noteData['is_loading_stt'] = false;
       if (mounted) {
-        setState(() => _isLoadingCleanSTT = false);
+        setState(() {
+          widget.noteData['is_loading_stt'] = false;
+          _isLoadingCleanSTT = false;
+        });
       }
     }
   }
@@ -855,11 +869,13 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
     if (stt.isEmpty) return;
 
-    setState(() {
-      _selectedFormat = formatType;
-      _isLoadingFormat = true;
-      widget.noteData['is_loading_format'] = true;
-    });
+    if (mounted) {
+      setState(() {
+        _selectedFormat = formatType;
+        _isLoadingFormat = true;
+        widget.noteData['is_loading_format'] = true;
+      });
+    }
 
     try {
       final baseUrl = ApiConfig.baseUrl;
@@ -881,9 +897,9 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
           if (mounted) {
             setState(() {
               _generatedCustomContent = content;
+              widget.noteData['custom_note'] = content;
             });
           }
-          widget.noteData['custom_note'] = content;
           await _updateLectureInDb({'custom_note': content});
         }
       } else {
@@ -900,9 +916,11 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         );
       }
     } finally {
-      widget.noteData['is_loading_format'] = false;
       if (mounted) {
-        setState(() => _isLoadingFormat = false);
+        setState(() {
+          widget.noteData['is_loading_format'] = false;
+          _isLoadingFormat = false;
+        });
       }
     }
   }

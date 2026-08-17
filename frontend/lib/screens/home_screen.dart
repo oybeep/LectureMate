@@ -176,31 +176,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-Future<void> _fetchNotesForSubject(int subjectId) async {
+  Future<void> _fetchNotesForSubject(int subjectId) async {
     setState(() {
       isLoadingNotes = true;
     });
-
     try {
-      final response = await http.get(Uri.parse('$baseUrl/lectures/subject/$subjectId'));
-      
-      // 💡 터미널에서 백엔드 응답 확인용 (디버깅)
-      print('=== 노트 조회 API 응답 ===');
-      print('상태 코드: ${response.statusCode}');
-      print('응답 본문: ${utf8.decode(response.bodyBytes)}');
-
+      final response =
+          await http.get(Uri.parse('$baseUrl/lectures/subject/$subjectId'));
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
-        
         setState(() {
-          // 🚨 수정된 부분: lectureNotes -> notes 로 변경
-          // (이전에 보여주신 UI 코드가 notes 변수를 참조하고 있기 때문입니다)
-          notes = data; 
+          lectureNotes = data;
         });
       }
     } catch (e) {
       _showFeedbackSnackBar('노트 불러오기 실패: $e', isError: true);
-      print('노트 조회 에러: $e'); // 에러 내용 터미널 출력
     } finally {
       setState(() {
         isLoadingNotes = false;
