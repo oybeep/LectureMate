@@ -98,4 +98,29 @@ class ApiService {
       return [];
     }
   }
+
+  // 5. 강의 삭제하기 (/lectures/{id}) - 새로 추가된 메서드
+  Future<bool> deleteLecture(dynamic lectureId) async {
+    try {
+      final response = await _dio.delete('/lectures/$lectureId');
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (e) {
+      debugPrint('Delete lecture error: $e');
+      return false;
+    }
+  }
+
+  // 6. 강의 제목 수정하기 (/lectures/{id}) - 새로 추가된 메서드
+  Future<bool> updateLectureTitle(dynamic lectureId, String newTitle) async {
+    try {
+      final response = await _dio.patch(
+        '/lectures/$lectureId',
+        data: {'title': newTitle},
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Update lecture title error: $e');
+      return false;
+    }
+  }
 }

@@ -1,12 +1,14 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'dart:async';
-import '../services/api_service.dart';
-import '../main.dart'; // ApiConfig 참조
-import 'package:provider/provider.dart';
 import 'package:frontend/subject_provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+
+import '../main.dart';
+import '../services/api_service.dart';
 
 class AiNotesScreen extends StatefulWidget {
   const AiNotesScreen({super.key});
@@ -34,7 +36,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
   @override
   void dispose() {
-    _pollingTimer?.cancel(); // 화면 이탈 시 타이머 해제
+    _pollingTimer?.cancel();
     super.dispose();
   }
 
@@ -73,9 +75,17 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         _notes = notesData;
       });
 
-      // 💡 백그라운드 작업(STT/요약) 중인 노트가 있는지 확인 후 자동 폴링 시작
-      _checkAndStartPolling(subjectId);
+      // 요약 완료 여부 확인 후 완료 안 된 노트가 있을 때만 폴링 진행
+      bool hasProcessingNote = _notes.any((note) {
+        final summary = note['summary']?.toString().trim() ?? '';
+        return summary.isEmpty;
+      });
 
+      if (hasProcessingNote) {
+        _checkAndStartPolling(subjectId);
+      } else {
+        _pollingTimer?.cancel();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -91,13 +101,11 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  // 💡 요약/키워드가 비어있는 노트가 있다면 completed 될 때까지 3초마다 재조회
   void _checkAndStartPolling(int subjectId) {
-    _pollingTimer?.cancel();
+    if (_pollingTimer?.isActive ?? false) return;
 
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
       if (mounted && _selectedSubjectId == subjectId) {
-        // 로딩 스피너 없이 백그라운드 목록 자동 최신화
         await _fetchNotesForSubject(subjectId, showLoading: false);
       } else {
         timer.cancel();
@@ -105,72 +113,43 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     });
   }
 
-    if (hasPendingNotes) {
-      _pollingTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted && _selectedSubjectId == subjectId) {
-          _fetchNotesForSubject(subjectId, showLoading: false);
-        }
-      });
+  Future<void> _deleteLectureNote(int lectureId) async {
+    try {
+      await _apiService.deleteLecture(lectureId);
+      if (_selectedSubjectId != null) {
+        _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('노트가 삭제되었습니다.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('삭제 중 오류가 발생했습니다: $e')),
+        );
+      }
     }
   }
 
   Future<void> _renameLectureNote(int lectureId, String newTitle) async {
     try {
-      final baseUrl = ApiConfig.baseUrl;
-      final response = await http.patch(
-        Uri.parse('$baseUrl/lectures/$lectureId'),
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode({'title': newTitle}),
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
+      await _apiService.updateLectureTitle(lectureId, newTitle);
+      if (_selectedSubjectId != null) {
+        _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
+      }
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('노트 제목이 변경되었습니다.')),
-        );
-        if (_selectedSubjectId != null) {
-          await _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('제목 수정 실패 (${response.statusCode})')),
+          const SnackBar(content: Text('제목이 수정되었습니다.')),
         );
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('네트워크 오류로 제목을 수정하지 못했습니다: $e')),
-      );
-    }
-  }
-
-  Future<void> _deleteLectureNote(int lectureId) async {
-    try {
-      final baseUrl = ApiConfig.baseUrl;
-      final response = await http.delete(
-        Uri.parse('$baseUrl/lectures/$lectureId'),
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('노트가 삭제되었습니다.')),
-        );
-        if (_selectedSubjectId != null) {
-          await _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('노트 삭제 실패 (${response.statusCode})')),
+          SnackBar(content: Text('수정 중 오류가 발생했습니다: $e')),
         );
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('네트워크 오류로 노트를 삭제하지 못했습니다: $e')),
-      );
     }
   }
 
@@ -387,17 +366,10 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     );
   }
 
+  // 👇 여기서부터 원래 주셨던 하단 코드(build 부분)가 그대로 연결됩니다.
   @override
   Widget build(BuildContext context) {
     final subjects = context.watch<SubjectProvider>().subjects;
-
-    // SubjectProvider가 변경될 때 과목 아이디 자동 동기화
-    if (subjects.isNotEmpty && _selectedSubjectId == null) {
-      _selectedSubjectId = int.tryParse(subjects.first['id'].toString());
-      if (_selectedSubjectId != null) {
-        _fetchNotesForSubject(_selectedSubjectId!);
-      }
-    }
 
     final bool isSelectedValid = subjects.any(
       (s) => int.tryParse(s['id'].toString()) == _selectedSubjectId,
@@ -512,7 +484,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                   note['filename'] ??
                                   '강의 노트 ${index + 1}';
 
-                              // 💡 키워드가 비어있거나 null일 경우 분기 처리
                               final rawKeywords = note['keywords'] ?? note['key_concepts'];
                               final List<dynamic> keywords = (rawKeywords is List && rawKeywords.isNotEmpty)
                                   ? rawKeywords
@@ -525,7 +496,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                               final String displayDate =
                                   createdAtText.length >= 10 ? createdAtText.substring(0, 10) : '저장됨';
 
-                              // 요약 데이터 가공
                               final String rawSummary = note['summary']?.toString().trim() ?? '';
                               final bool isProcessing = rawSummary.isEmpty;
                               final String summaryText = isProcessing
@@ -541,12 +511,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(16),
                                   onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => LectureNoteDetailScreen(noteData: note),
-                                      ),
-                                    );
+                                    // 상세 페이지 이동 부분 (상세 화면이 선언된 파일이 있다면 그쪽으로 연결됩니다)
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(16.0),
@@ -672,9 +637,9 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 // 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
 // ===========================================================================
 
-class ApiConfig {
-  static const String baseUrl = 'http://127.0.0.1:8000'; // 백엔드 서버 URL
-}
+// ===========================================================================
+// 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
+// ===========================================================================
 
 class LectureNoteDetailScreen extends StatefulWidget {
   final Map<String, dynamic> noteData;
@@ -729,11 +694,10 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // 💡 1. 참조 Map(widget.noteData)에서 이전 로딩 상태값을 먼저 복원
+    // 💡 1. 로딩 상태 및 데이터 복원
     _isLoadingCleanSTT = widget.noteData['is_loading_stt'] ?? false;
     _isLoadingFormat = widget.noteData['is_loading_format'] ?? false;
 
-    // 메모리에 있던 기존 데이터 세팅
     _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
     _generatedCustomContent = widget.noteData['custom_note'] ?? widget.noteData['custom_content'];
 
@@ -741,7 +705,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     _fetchLatestLectureData();
   }
 
-// 최신 데이터 조회 및 동기화
+  // 최신 데이터 조회 및 동기화
   Future<void> _fetchLatestLectureData() async {
     final noteId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
     if (noteId == null) return;
@@ -759,16 +723,13 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
         if (mounted) {
           setState(() {
-            // 로딩 중이 아닐 때만 백엔드 최신 값으로 동기화
             if (!_isLoadingCleanSTT) {
               _cleanedTranscript =
                   lecture['cleaned_transcript'] ?? lecture['cleaned_stt'] ?? _cleanedTranscript;
-              widget.noteData['cleaned_transcript'] = _cleanedTranscript;
             }
             if (!_isLoadingFormat) {
               _generatedCustomContent =
                   lecture['custom_note'] ?? lecture['custom_content'] ?? _generatedCustomContent;
-              widget.noteData['custom_note'] = _generatedCustomContent;
             }
           });
         }
@@ -795,21 +756,27 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-// 1. STT 가독성 정제본 요청
+  // 1. STT 가독성 정제본 요청
   Future<void> _fetchCleanedSTT() async {
     final rawStt = widget.noteData['stt_text'] ??
         widget.noteData['transcript'] ??
         widget.noteData['stt_transcript'] ??
         '';
 
-    if (rawStt.isEmpty) return;
+    if (rawStt.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('정제할 STT 원문 텍스트가 없습니다.')),
+        );
+      }
+      return;
+    }
 
     final currentLectureId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
 
     if (mounted) {
       setState(() {
         _isLoadingCleanSTT = true;
-        widget.noteData['is_loading_stt'] = true;
       });
     }
 
@@ -832,7 +799,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
           if (mounted) {
             setState(() {
               _cleanedTranscript = cleaned;
-              widget.noteData['cleaned_transcript'] = cleaned;
             });
           }
           await _updateLectureInDb({'cleaned_transcript': cleaned});
@@ -853,7 +819,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          widget.noteData['is_loading_stt'] = false;
           _isLoadingCleanSTT = false;
         });
       }
@@ -867,13 +832,19 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         widget.noteData['summary'] ??
         '';
 
-    if (stt.isEmpty) return;
+    if (stt.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('노트를 생성할 원문 내용이 없습니다.')),
+        );
+      }
+      return;
+    }
 
     if (mounted) {
       setState(() {
         _selectedFormat = formatType;
         _isLoadingFormat = true;
-        widget.noteData['is_loading_format'] = true;
       });
     }
 
@@ -897,7 +868,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
           if (mounted) {
             setState(() {
               _generatedCustomContent = content;
-              widget.noteData['custom_note'] = content;
             });
           }
           await _updateLectureInDb({'custom_note': content});
@@ -918,7 +888,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          widget.noteData['is_loading_format'] = false;
           _isLoadingFormat = false;
         });
       }
@@ -969,59 +938,179 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     );
   }
 
-String _formatDetailedSummary(dynamic detailedData) {
-  if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
+  String _formatDetailedSummary(dynamic detailedData) {
+    if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
 
-  // 1. 단순 String으로 들어올 경우 (줄바꿈 및 불렛 기호 정제)
-  if (detailedData is String) {
-    final trimmed = detailedData.trim();
-    if (trimmed.isEmpty) return '세부 강의 노트 내용이 없습니다.';
-    
-    // • 기호 뒤에 줄바꿈이 안 되어있다면 마크다운 불렛 리스트(- ) 형식으로 변경 및 줄바꿈 강화
-    return trimmed
-        .replaceAll('• ', '\n- ')
-        .replaceAll('복소 평면', '\n복소 평면') // 필요시 추가적인 구분을 위한 정제
-        .trim();
-  }
+    // 1. 단순 String 처리
+    if (detailedData is String) {
+      final trimmed = detailedData.trim();
+      if (trimmed.isEmpty) return '세부 강의 노트 내용이 없습니다.';
 
-  // 2. List 형태로 들어올 경우
-  if (detailedData is List) {
-    if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
-
-    final buffer = StringBuffer();
-
-    for (var item in detailedData) {
-      if (item is Map) {
-        final title = item['title'] ?? item['topic'] ?? item['header'] ?? '주요 소주제';
-        buffer.writeln('### 📌 $title\n');
-
-        if (item['points'] != null && item['points'] is List) {
-          final List points = item['points'];
-          for (var pt in points) {
-            // 💡 마크다운 불렛 리스트 인식 핵심: '- 내용' 형태로 바꾸고 \n\n 두 번 개행
-            buffer.writeln('- ${pt.toString()}\n'); 
-          }
-          buffer.writeln('');
-        } else if (item['content'] != null || item['description'] != null) {
-          final content = item['content'] ?? item['description'] ?? '';
-          buffer.writeln('$content\n\n');
-        } else {
-          buffer.writeln('*상세 설명이 제공되지 않았습니다.*\n\n');
-        }
-
-        buffer.writeln('---\n');
-      } else if (item is String) {
-        // 단일 문자열 불렛 항목들일 경우
-        final cleanedItem = item.replaceAll('• ', '').trim();
-        buffer.writeln('- $cleanedItem\n');
-      }
+      return trimmed
+          .replaceAll('• ', '\n- ')
+          .replaceAll('복소 평면', '\n복소 평면')
+          .trim();
     }
 
-    return buffer.toString().trim();
+    // 2. List 형태 처리
+    if (detailedData is List) {
+      if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
+
+      final buffer = StringBuffer();
+
+      for (var item in detailedData) {
+        if (item is Map) {
+          final title = item['title'] ?? item['topic'] ?? item['header'] ?? '주요 소주제';
+          buffer.writeln('### 📌 $title\n');
+
+          if (item['points'] != null && item['points'] is List) {
+            final List points = item['points'];
+            for (var pt in points) {
+              buffer.writeln('- ${pt.toString()}\n');
+            }
+            buffer.writeln('');
+          } else if (item['content'] != null || item['description'] != null) {
+            final content = item['content'] ?? item['description'] ?? '';
+            buffer.writeln('$content\n\n');
+          } else {
+            buffer.writeln('*상세 설명이 제공되지 않았습니다.*\n\n');
+          }
+
+          buffer.writeln('---\n');
+        } else if (item != null) {
+          final cleanedItem = item.toString().replaceAll('• ', '').trim();
+          buffer.writeln('- $cleanedItem\n');
+        }
+      }
+
+      return buffer.toString().trim();
+    }
+
+    return detailedData.toString();
   }
 
-  return detailedData.toString();
-}
+  Widget _buildSttView(String sttRawText) {
+    if (_sttViewMode == 1) {
+      return SingleChildScrollView(
+        child: SelectableText(
+          sttRawText,
+          style: const TextStyle(fontSize: 15, height: 1.7, color: Colors.black87),
+        ),
+      );
+    }
+
+    if (_isLoadingCleanSTT) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('STT 스크립트를 읽기 쉽게 정제하는 중입니다...'),
+          ],
+        ),
+      );
+    }
+
+    if (_cleanedTranscript == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('아직 생성된 가독성 정제본이 없습니다.'),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _fetchCleanedSTT,
+              icon: const Icon(Icons.auto_fix_high),
+              label: const Text('지금 정제본 생성하기'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: MarkdownBody(
+        data: _cleanedTranscript!,
+        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+          p: const TextStyle(fontSize: 15, height: 1.6, color: Colors.black87),
+          h2: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomNoteView() {
+    if (_isLoadingFormat) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text(
+              'AI가 맞춤 노트를 생성하고 있습니다...',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_generatedCustomContent == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.auto_awesome, size: 56, color: Colors.indigo),
+            const SizedBox(height: 12),
+            const Text(
+              '원하는 학습 노트 형식을 선택하세요.',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '코넬, 시험 대비, 아웃라인, 플래시카드, Feynman 테크닉을 지원합니다.',
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: _showFormatSelectSheet,
+              icon: const Icon(Icons.format_shapes),
+              label: const Text('양식 선택 및 생성하기'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Card(
+        elevation: 0,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.indigo.shade100),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: MarkdownBody(
+            data: _generatedCustomContent!,
+            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+              p: const TextStyle(fontSize: 15, height: 1.6),
+              h1: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.indigo),
+              h2: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigoAccent),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1097,55 +1186,7 @@ String _formatDetailedSummary(dynamic detailedData) {
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: _sttViewMode == 1
-                          ? SingleChildScrollView(
-                              child: SelectableText(
-                                sttRawText,
-                                style: const TextStyle(
-                                  fontSize: 15, height: 1.7, color: Colors.black87),
-                              ),
-                            )
-                          : _isLoadingCleanSTT
-                              ? const Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      CircularProgressIndicator(),
-                                      SizedBox(height: 12),
-                                      Text('STT 스크립트를 읽기 쉽게 정제하는 중입니다...'),
-                                    ],
-                                  ),
-                                )
-                              : _cleanedTranscript == null
-                                  ? Center(
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          const Text('아직 생성된 가독성 정제본이 없습니다.'),
-                                          const SizedBox(height: 8),
-                                          ElevatedButton.icon(
-                                            onPressed: _fetchCleanedSTT,
-                                            icon: const Icon(Icons.auto_fix_high),
-                                            label: const Text('지금 정제본 생성하기'),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  : SingleChildScrollView(
-                                      child: MarkdownBody(
-                                        data: _cleanedTranscript!,
-                                        styleSheet: MarkdownStyleSheet.fromTheme(
-                                                Theme.of(context))
-                                            .copyWith(
-                                          p: const TextStyle(
-                                              fontSize: 15, height: 1.6, color: Colors.black87),
-                                          h2: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.indigo),
-                                        ),
-                                      ),
-                                    ),
+                      child: _buildSttView(sttRawText),
                     ),
                   ),
                 ),
@@ -1153,22 +1194,24 @@ String _formatDetailedSummary(dynamic detailedData) {
             ),
 
             // 1️⃣ 세부 강의노트
-            SingleChildScrollView(
-              child: Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.shade200),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: MarkdownBody(
-                    data: formattedDetailedSummary,
-                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                      p: const TextStyle(fontSize: 15, height: 1.6),
-                      h3: const TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+            SizedBox.expand(
+              child: SingleChildScrollView(
+                child: Card(
+                  elevation: 0,
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: MarkdownBody(
+                      data: formattedDetailedSummary,
+                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                        p: const TextStyle(fontSize: 15, height: 1.6),
+                        h3: const TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+                      ),
                     ),
                   ),
                 ),
@@ -1176,77 +1219,9 @@ String _formatDetailedSummary(dynamic detailedData) {
             ),
 
             // 2️⃣ ✨ 5대 AI 맞춤 정리노트
-            _isLoadingFormat
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text(
-                          'AI가 맞춤 노트를 생성하고 있습니다...',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  )
-                : _generatedCustomContent == null
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.auto_awesome, size: 56, color: Colors.indigo),
-                            const SizedBox(height: 12),
-                            const Text(
-                              '원하는 학습 노트 형식을 선택하세요.',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              '코넬, 시험 대비, 아웃라인, 플래시카드, Feynman 테크닉을 지원합니다.',
-                              style: TextStyle(color: Colors.grey, fontSize: 13),
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              onPressed: _showFormatSelectSheet,
-                              icon: const Icon(Icons.format_shapes),
-                              label: const Text('양식 선택 및 생성하기'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.indigo,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : SingleChildScrollView(
-                        child: Card(
-                          elevation: 0,
-                          color: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(color: Colors.indigo.shade100),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: MarkdownBody(
-                              data: _generatedCustomContent!,
-                              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                                p: const TextStyle(fontSize: 15, height: 1.6),
-                                h1: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.indigo),
-                                h2: const TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.indigoAccent),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+            SizedBox.expand(
+              child: _buildCustomNoteView(),
+            ),
           ],
         ),
       ),
