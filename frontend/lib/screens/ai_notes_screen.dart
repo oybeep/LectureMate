@@ -637,10 +637,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 // 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
 // ===========================================================================
 
-// ===========================================================================
-// 📖 전체화면 AI 노트 상세 (STT 정제 스크립트 / 세부 강의노트 / 5대 맞춤 AI 정리노트)
-// ===========================================================================
-
 class LectureNoteDetailScreen extends StatefulWidget {
   final Map<String, dynamic> noteData;
 
@@ -1193,35 +1189,31 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
               ],
             ),
 
-            // 1️⃣ 세부 강의노트
-            SizedBox.expand(
-              child: SingleChildScrollView(
-                child: Card(
-                  elevation: 0,
-                  color: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.grey.shade200),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: MarkdownBody(
-                      data: formattedDetailedSummary,
-                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                        p: const TextStyle(fontSize: 15, height: 1.6),
-                        h3: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
-                      ),
+            // 1️⃣ 세부 강의노트 (💡 SizedBox.expand 제거 및 스크롤 최적화)
+            SingleChildScrollView(
+              child: Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.grey.shade200),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: MarkdownBody(
+                    data: formattedDetailedSummary,
+                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                      p: const TextStyle(fontSize: 15, height: 1.6),
+                      h3: const TextStyle(
+                          fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
                     ),
                   ),
                 ),
               ),
             ),
 
-            // 2️⃣ ✨ 5대 AI 맞춤 정리노트
-            SizedBox.expand(
-              child: _buildCustomNoteView(),
-            ),
+            // 2️⃣ ✨ 5대 AI 맞춤 정리노트 (💡 SizedBox.expand 제거)
+            _buildCustomNoteView(),
           ],
         ),
       ),
