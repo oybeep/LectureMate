@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:frontend/subject_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../main.dart';
 import '../services/api_service.dart';
@@ -75,7 +76,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         _notes = notesData;
       });
 
-      // 요약 완료 여부 확인 후 완료 안 된 노트가 있을 때만 폴링 진행
+      // 요약 진행 중인 노특가 있을 때만 4초 마다 폴링
       bool hasProcessingNote = _notes.any((note) {
         final summary = note['summary']?.toString().trim() ?? '';
         return summary.isEmpty;
@@ -366,7 +367,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     );
   }
 
-  // 👇 여기서부터 원래 주셨던 하단 코드(build 부분)가 그대로 연결됩니다.
   @override
   Widget build(BuildContext context) {
     final subjects = context.watch<SubjectProvider>().subjects;
@@ -456,6 +456,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                     },
                     child: _notes.isEmpty
                         ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(), // 💡 빈 화면에서도 새로고침 스크롤 가능하도록 추가
                             children: const [
                               SizedBox(height: 150),
                               Center(
@@ -489,7 +490,9 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                   ? rawKeywords
                                   : ['분석 중...'];
 
-                              final List<dynamic> quizzes = note['quizzes'] ?? note['quiz'] ?? [];
+                              final List<dynamic> quizzes = (note['quizzes'] is List)
+                                  ? note['quizzes']
+                                  : ((note['quiz'] is List) ? note['quiz'] : []);
 
                               final String createdAtText =
                                   note['created_at']?.toString() ?? note['date']?.toString() ?? '';
@@ -510,8 +513,15 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                 ),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(16),
+                                  // 💡 카드 전체 클릭 시 상세 페이지 연결 (필요한 DetailScreen 클래스명 지정)
                                   onTap: () {
-                                    // 상세 페이지 이동 부분 (상세 화면이 선언된 파일이 있다면 그쪽으로 연결됩니다)
+        
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => LectureNoteDetailScreen(noteData: note),
+                                      ),
+                                    );
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(16.0),
