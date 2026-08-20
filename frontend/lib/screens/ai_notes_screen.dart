@@ -103,7 +103,8 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   }
 
   void _checkAndStartPolling(int subjectId) {
-    if (_pollingTimer?.isActive ?? false) return;
+    // 이전 타이머가 작동 중이라면 취소하여 타이머 중첩 및 과목 꼬임 방지
+    _pollingTimer?.cancel();
 
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
       if (mounted && _selectedSubjectId == subjectId) {
@@ -117,20 +118,23 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   Future<void> _deleteLectureNote(int lectureId) async {
     try {
       await _apiService.deleteLecture(lectureId);
+    
+      // 비동기 요청 후 위젯이 해제되었으면 이후 작업 중단
+      if (!mounted) return;
+
       if (_selectedSubjectId != null) {
         _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('노트가 삭제되었습니다.')),
-        );
-      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('노트가 삭제되었습니다.')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('삭제 중 오류가 발생했습니다: $e')),
-        );
-      }
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('삭제 중 오류가 발생했습니다: $e')),
+      );
     }
   }
 
@@ -659,6 +663,11 @@ class LectureNoteDetailScreen extends StatefulWidget {
 class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   int _currentTabIndex = 1; // 기본값: 1번 탭 (세부 강의노트)
 
+  // 💡 폴링 및 메인 강의 데이터 상태 관리 추가
+  Timer? _statusPollingTimer;
+  Map<String, dynamic>? _lectureData;
+  bool _isProcessing = false;
+
   // STT 정제 상태 관리
   int _sttViewMode = 0; // 0: 가독성 정제본, 1: 원문 그대로
   String? _cleanedTranscript;
@@ -700,20 +709,33 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // 💡 1. 로딩 상태 및 데이터 복원
+    // 초기 전달 데이터 저장
+    _lectureData = Map<String, dynamic>.from(widget.noteData);
+
+    // 💡 초기 processing 상태 체크
+    _isProcessing = _lectureData?['status'] == 'processing';
+
+    // 1. 로딩 상태 및 데이터 복원
     _isLoadingCleanSTT = widget.noteData['is_loading_stt'] ?? false;
     _isLoadingFormat = widget.noteData['is_loading_format'] ?? false;
 
     _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
     _generatedCustomContent = widget.noteData['custom_note'] ?? widget.noteData['custom_content'];
 
-    // 💡 2. 화면 진입 시 최신 DB 조회
+    // 2. 화면 진입 시 최신 DB 조회 (상태에 따라 타이머 자동 시작)
     _fetchLatestLectureData();
   }
 
-  // 최신 데이터 조회 및 동기화
+  // 💡 메모리 누수 방지를 위한 dispose 구현
+  @override
+  void dispose() {
+    _statusPollingTimer?.cancel();
+    super.dispose();
+  }
+
+  // 최신 데이터 조회 및 동기화 (+ 백그라운드 작업 폴링 로직)
   Future<void> _fetchLatestLectureData() async {
-    final noteId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
+    final noteId = _lectureData?['id'] ?? _lectureData?['lecture_id'];
     if (noteId == null) return;
 
     try {
@@ -729,6 +751,9 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
         if (mounted) {
           setState(() {
+            _lectureData = Map<String, dynamic>.from(lecture);
+            _isProcessing = lecture['status'] == 'processing';
+
             if (!_isLoadingCleanSTT) {
               _cleanedTranscript =
                   lecture['cleaned_transcript'] ?? lecture['cleaned_stt'] ?? _cleanedTranscript;
@@ -738,6 +763,13 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                   lecture['custom_note'] ?? lecture['custom_content'] ?? _generatedCustomContent;
             }
           });
+
+          // 💡 아직 processing 상태라면 4초 마다 폴링 시작
+          if (_isProcessing) {
+            _startStatusPolling();
+          } else {
+            _statusPollingTimer?.cancel();
+          }
         }
       }
     } catch (e) {
@@ -745,9 +777,22 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
+  // 💡 백그라운드 AI 작업 완결 여부를 감지하는 폴링 타이머
+  void _startStatusPolling() {
+    _statusPollingTimer?.cancel(); // 중복 타이머 방지
+
+    _statusPollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      await _fetchLatestLectureData();
+    });
+  }
+
   // DB 영구 저장 헬퍼
   Future<void> _updateLectureInDb(Map<String, dynamic> updateFields) async {
-    final noteId = int.tryParse((widget.noteData['id'] ?? widget.noteData['lecture_id']).toString()) ?? 0;
+    final noteId = int.tryParse((_lectureData?['id'] ?? _lectureData?['lecture_id']).toString()) ?? 0;
     if (noteId == 0) return;
 
     try {
@@ -764,9 +809,9 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
   // 1. STT 가독성 정제본 요청
   Future<void> _fetchCleanedSTT() async {
-    final rawStt = widget.noteData['stt_text'] ??
-        widget.noteData['transcript'] ??
-        widget.noteData['stt_transcript'] ??
+    final rawStt = _lectureData?['stt_text'] ??
+        _lectureData?['transcript'] ??
+        _lectureData?['stt_transcript'] ??
         '';
 
     if (rawStt.isEmpty) {
@@ -778,7 +823,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
       return;
     }
 
-    final currentLectureId = widget.noteData['id'] ?? widget.noteData['lecture_id'];
+    final currentLectureId = _lectureData?['id'] ?? _lectureData?['lecture_id'];
 
     if (mounted) {
       setState(() {
@@ -833,9 +878,9 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
   // 2. 5대 맞춤 노트 생성 요청
   Future<void> _fetchCustomFormat(String formatType) async {
-    final stt = widget.noteData['stt_text'] ??
-        widget.noteData['transcript'] ??
-        widget.noteData['summary'] ??
+    final stt = _lectureData?['stt_text'] ??
+        _lectureData?['transcript'] ??
+        _lectureData?['summary'] ??
         '';
 
     if (stt.isEmpty) {
@@ -862,7 +907,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         body: jsonEncode({
           'stt_text': stt,
           'format_type': formatType,
-          'lecture_id': widget.noteData['id'] ?? widget.noteData['lecture_id'],
+          'lecture_id': _lectureData?['id'] ?? _lectureData?['lecture_id'],
         }),
       );
 
@@ -947,7 +992,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   String _formatDetailedSummary(dynamic detailedData) {
     if (detailedData == null) return '세부 강의 노트 내용이 없습니다.';
 
-    // 1. 단순 String 처리
     if (detailedData is String) {
       final trimmed = detailedData.trim();
       if (trimmed.isEmpty) return '세부 강의 노트 내용이 없습니다.';
@@ -958,7 +1002,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
           .trim();
     }
 
-    // 2. List 형태 처리
     if (detailedData is List) {
       if (detailedData.isEmpty) return '세부 강의 노트 내용이 없습니다.';
 
@@ -1120,20 +1163,20 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.noteData['title'] ??
-        widget.noteData['lecture_title'] ??
-        widget.noteData['filename'] ??
+    final title = _lectureData?['title'] ??
+        _lectureData?['lecture_title'] ??
+        _lectureData?['filename'] ??
         '강의 상세 노트';
 
-    final sttRawText = widget.noteData['stt_text'] ??
-        widget.noteData['transcript'] ??
-        widget.noteData['stt_transcript'] ??
+    final sttRawText = _lectureData?['stt_text'] ??
+        _lectureData?['transcript'] ??
+        _lectureData?['stt_transcript'] ??
         '추출된 STT 원문 텍스트가 없습니다.';
 
-    final detailedSummaryRaw = widget.noteData['detailed_summary'] ??
-        widget.noteData['detail_summary'] ??
-        widget.noteData['details'] ??
-        widget.noteData['summary'];
+    final detailedSummaryRaw = _lectureData?['detailed_summary'] ??
+        _lectureData?['detail_summary'] ??
+        _lectureData?['details'] ??
+        _lectureData?['summary'];
 
     final formattedDetailedSummary = _formatDetailedSummary(detailedSummaryRaw);
 
@@ -1199,30 +1242,50 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
               ],
             ),
 
-            // 1️⃣ 세부 강의노트 (💡 SizedBox.expand 제거 및 스크롤 최적화)
-            SingleChildScrollView(
-              child: Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: Colors.grey.shade200),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: MarkdownBody(
-                    data: formattedDetailedSummary,
-                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                      p: const TextStyle(fontSize: 15, height: 1.6),
-                      h3: const TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+            // 1️⃣ 세부 강의노트 (💡 백그라운드 AI 요약 진행 중일 때 처리 추가)
+            _isProcessing
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text(
+                          'AI가 강의 노트를 요약·작성 중입니다...',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          '완료되면 화면이 자동으로 업데이트됩니다.\n탭을 이동하거나 앱을 나가셔도 백그라운드에서 진행됩니다.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  )
+                : SingleChildScrollView(
+                    child: Card(
+                      elevation: 0,
+                      color: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade200),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: MarkdownBody(
+                          data: formattedDetailedSummary,
+                          styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                            p: const TextStyle(fontSize: 15, height: 1.6),
+                            h3: const TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
 
-            // 2️⃣ ✨ 5대 AI 맞춤 정리노트 (💡 SizedBox.expand 제거)
+            // 2️⃣ ✨ 5대 AI 맞춤 정리노트
             _buildCustomNoteView(),
           ],
         ),
