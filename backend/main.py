@@ -592,21 +592,22 @@ async def handle_audio_upload_universal(
         db.commit()
         db.refresh(new_lecture)
 
-        # 3. 💡 [수정 포인트] 백그라운드가 아닌 동기(await)로 AI 요약 작업이 끝나길 기다림
-        await task_summarize_lecture(
+        # -------------------------------------------------------------
+        # 💡 [수정] await 제거 -> background_tasks에 작업 등록
+        # -------------------------------------------------------------
+        background_tasks.add_task(
+            task_summarize_lecture,
             new_lecture.id,
             selected_subject_name,
             file_name,
             stt_transcript
         )
 
-        # 4. 요약/키워드가 반영된 최신 DB 데이터 다시 불러오기
-        db.refresh(new_lecture)
-
+        # 4. 즉시 응답 반환 (status는 format_lecture_response에 의해 'processing'으로 전달됨)
         formatted = format_lecture_response(new_lecture, selected_subject_name)
         return {
-            "status": "success",
-            "message": f"'{file_name}' 전사 및 AI 요약이 성공적으로 완료되었습니다.",
+            "status": "processing",
+            "message": f"'{file_name}' 파일 전사 완료. AI 요약이 백그라운드에서 진행 중입니다.",
             **formatted
         }
 
