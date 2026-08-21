@@ -6,7 +6,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:frontend/subject_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../main.dart';
 import '../services/api_service.dart';
@@ -663,7 +662,6 @@ class LectureNoteDetailScreen extends StatefulWidget {
 class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   int _currentTabIndex = 1; // 기본값: 1번 탭 (세부 강의노트)
 
-  // 💡 폴링 및 메인 강의 데이터 상태 관리 추가
   Timer? _statusPollingTimer;
   Map<String, dynamic>? _lectureData;
   bool _isProcessing = false;
@@ -709,31 +707,29 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // 초기 전달 데이터 저장
     _lectureData = Map<String, dynamic>.from(widget.noteData);
 
-    // 💡 초기 processing 상태 체크
-    _isProcessing = _lectureData?['status'] == 'processing';
+    // initial status 체크 (processing 여부 확인)
+    final initialStatus = _lectureData?['status']?.toString().toLowerCase();
+    _isProcessing = initialStatus == 'processing' || initialStatus == 'pending';
 
-    // 1. 로딩 상태 및 데이터 복원
     _isLoadingCleanSTT = widget.noteData['is_loading_stt'] ?? false;
     _isLoadingFormat = widget.noteData['is_loading_format'] ?? false;
 
     _cleanedTranscript = widget.noteData['cleaned_transcript'] ?? widget.noteData['cleaned_stt'];
     _generatedCustomContent = widget.noteData['custom_note'] ?? widget.noteData['custom_content'];
 
-    // 2. 화면 진입 시 최신 DB 조회 (상태에 따라 타이머 자동 시작)
+    // 화면 진입 시 즉시 데이터 최신화 및 폴링 여부 결정
     _fetchLatestLectureData();
   }
 
-  // 💡 메모리 누수 방지를 위한 dispose 구현
   @override
   void dispose() {
     _statusPollingTimer?.cancel();
     super.dispose();
   }
 
-  // 최신 데이터 조회 및 동기화 (+ 백그라운드 작업 폴링 로직)
+  // 최신 데이터 조회 및 status 폴링 처리
   Future<void> _fetchLatestLectureData() async {
     final noteId = _lectureData?['id'] ?? _lectureData?['lecture_id'];
     if (noteId == null) return;
@@ -750,9 +746,12 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         final lecture = data['data'] ?? data;
 
         if (mounted) {
+          final currentStatus = lecture['status']?.toString().toLowerCase();
+          final isStillProcessing = currentStatus == 'processing' || currentStatus == 'pending';
+
           setState(() {
             _lectureData = Map<String, dynamic>.from(lecture);
-            _isProcessing = lecture['status'] == 'processing';
+            _isProcessing = isStillProcessing;
 
             if (!_isLoadingCleanSTT) {
               _cleanedTranscript =
@@ -764,8 +763,8 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
             }
           });
 
-          // 💡 아직 processing 상태라면 4초 마다 폴링 시작
-          if (_isProcessing) {
+          // 작업 중이면 주기적으로 확인, 완료되었으면 타이머 중지
+          if (isStillProcessing) {
             _startStatusPolling();
           } else {
             _statusPollingTimer?.cancel();
@@ -777,11 +776,10 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-  // 💡 백그라운드 AI 작업 완결 여부를 감지하는 폴링 타이머
   void _startStatusPolling() {
-    _statusPollingTimer?.cancel(); // 중복 타이머 방지
+    if (_statusPollingTimer != null && _statusPollingTimer!.isActive) return;
 
-    _statusPollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
+    _statusPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       if (!mounted) {
         timer.cancel();
         return;
@@ -790,7 +788,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     });
   }
 
-  // DB 영구 저장 헬퍼
   Future<void> _updateLectureInDb(Map<String, dynamic> updateFields) async {
     final noteId = int.tryParse((_lectureData?['id'] ?? _lectureData?['lecture_id']).toString()) ?? 0;
     if (noteId == 0) return;
@@ -807,7 +804,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-  // 1. STT 가독성 정제본 요청
   Future<void> _fetchCleanedSTT() async {
     final rawStt = _lectureData?['stt_text'] ??
         _lectureData?['transcript'] ??
@@ -876,7 +872,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
   }
 
-  // 2. 5대 맞춤 노트 생성 요청
   Future<void> _fetchCustomFormat(String formatType) async {
     final stt = _lectureData?['stt_text'] ??
         _lectureData?['transcript'] ??
@@ -1038,6 +1033,30 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     return detailedData.toString();
   }
 
+  // 💡 공통 로딩 화면 렌더링 (캡처 사진과 동일한 스펙)
+  Widget _buildProcessingLoadingView(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+            strokeWidth: 3,
+            color: Colors.indigo,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            message,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSttView(String sttRawText) {
     if (_sttViewMode == 1) {
       return SingleChildScrollView(
@@ -1049,16 +1068,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     }
 
     if (_isLoadingCleanSTT) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 12),
-            Text('STT 스크립트를 읽기 쉽게 정제하는 중입니다...'),
-          ],
-        ),
-      );
+      return _buildProcessingLoadingView('STT 스크립트를 정제하고 있습니다...');
     }
 
     if (_cleanedTranscript == null) {
@@ -1091,19 +1101,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
   Widget _buildCustomNoteView() {
     if (_isLoadingFormat) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text(
-              'AI가 맞춤 노트를 생성하고 있습니다...',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      );
+      return _buildProcessingLoadingView('AI가 맞춤 노트를 생성하고 있습니다...');
     }
 
     if (_generatedCustomContent == null) {
@@ -1185,7 +1183,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          if (_currentTabIndex == 2)
+          if (_currentTabIndex == 2 && !_isProcessing)
             IconButton(
               icon: const Icon(Icons.style_outlined),
               tooltip: '양식 변경',
@@ -1195,75 +1193,58 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: IndexedStack(
-          index: _currentTabIndex,
-          children: [
-            // 0️⃣ STT 스크립트
-            Column(
-              children: [
-                SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 0,
-                      label: Text('✨ AI 가독성 정제본'),
-                      icon: Icon(Icons.auto_fix_high),
-                    ),
-                    ButtonSegment(
-                      value: 1,
-                      label: Text('📝 원문 그대로'),
-                      icon: Icon(Icons.raw_on_outlined),
-                    ),
-                  ],
-                  selected: {_sttViewMode},
-                  onSelectionChanged: (Set<int> newSelection) {
-                    setState(() {
-                      _sttViewMode = newSelection.first;
-                    });
-                    if (_sttViewMode == 0 && _cleanedTranscript == null && !_isLoadingCleanSTT) {
-                      _fetchCleanedSTT();
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Card(
-                    elevation: 0,
-                    color: Colors.grey.shade50,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: _buildSttView(sttRawText),
-                    ),
+        child: _isProcessing
+            // 💡 서버에서 처리 완료될 때까지 첨부 이미지와 동등한 로딩 화면 유지
+            ? _buildProcessingLoadingView('AI가 강의 노트를 생성하고 있습니다...')
+            : IndexedStack(
+                index: _currentTabIndex,
+                children: [
+                  // 0️⃣ STT 스크립트
+                  Column(
+                    children: [
+                      SegmentedButton<int>(
+                        segments: const [
+                          ButtonSegment(
+                            value: 0,
+                            label: Text('✨ AI 가독성 정제본'),
+                            icon: Icon(Icons.auto_fix_high),
+                          ),
+                          ButtonSegment(
+                            value: 1,
+                            label: Text('📝 원문 그대로'),
+                            icon: Icon(Icons.raw_on_outlined),
+                          ),
+                        ],
+                        selected: {_sttViewMode},
+                        onSelectionChanged: (Set<int> newSelection) {
+                          setState(() {
+                            _sttViewMode = newSelection.first;
+                          });
+                          if (_sttViewMode == 0 && _cleanedTranscript == null && !_isLoadingCleanSTT) {
+                            _fetchCleanedSTT();
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: Card(
+                          elevation: 0,
+                          color: Colors.grey.shade50,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: _buildSttView(sttRawText),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
 
-            // 1️⃣ 세부 강의노트 (💡 백그라운드 AI 요약 진행 중일 때 처리 추가)
-            _isProcessing
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text(
-                          'AI가 강의 노트를 요약·작성 중입니다...',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          '완료되면 화면이 자동으로 업데이트됩니다.\n탭을 이동하거나 앱을 나가셔도 백그라운드에서 진행됩니다.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey, fontSize: 13),
-                        ),
-                      ],
-                    ),
-                  )
-                : SingleChildScrollView(
+                  // 1️⃣ 세부 강의노트
+                  SingleChildScrollView(
                     child: Card(
                       elevation: 0,
                       color: Colors.white,
@@ -1285,10 +1266,10 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                     ),
                   ),
 
-            // 2️⃣ ✨ 5대 AI 맞춤 정리노트
-            _buildCustomNoteView(),
-          ],
-        ),
+                  // 2️⃣ ✨ 5대 AI 맞춤 정리노트
+                  _buildCustomNoteView(),
+                ],
+              ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentTabIndex,
