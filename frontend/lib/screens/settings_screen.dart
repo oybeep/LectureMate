@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import '../settings_provider.dart';
+import '../models/app_settings.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -9,48 +11,31 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // 설정 상태 변수들
-  bool _isNotificationEnabled = true;
-  bool _isAutoSummaryEnabled = true;
-  bool _isDarkMode = false;
-  String _selectedLanguage = '한국어';
-
-  // 사용자 프로필 임시 데이터
-  String _userName = '홍길동';
-  String _userEmail = 'user@lecturemate.com';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
-  }
-
-  // 로컬 저장소에서 설정값 불러오기
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _isNotificationEnabled = prefs.getBool('isNotificationEnabled') ?? true;
-      _isAutoSummaryEnabled = prefs.getBool('isAutoSummaryEnabled') ?? true;
-      _isDarkMode = prefs.getBool('isDarkMode') ?? false;
-      _selectedLanguage = prefs.getString('selectedLanguage') ?? '한국어';
-      _userName = prefs.getString('userName') ?? '홍길동';
-      _userEmail = prefs.getString('userEmail') ?? 'user@lecturemate.com';
-    });
-  }
-
-  // 설정값 변경 시 로컬 저장소에 저장
-  Future<void> _saveBoolSetting(String key, bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(key, value);
-  }
-
-  Future<void> _saveStringSetting(String key, String value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(key, value);
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Provider 구독 (상태 변화 시 UI 자동 리렌더링)
+    final settingsProvider = context.watch<SettingsProvider>();
+    final userProfile = settingsProvider.userProfile;
+    final appSettings = settingsProvider.appSettings;
+
+    // 로딩 중 처리
+    if (settingsProvider.isLoading && userProfile == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('설정', style: TextStyle(fontWeight: FontWeight.bold)),
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final userName = userProfile?.name ?? '사용자';
+    final userEmail = userProfile?.email ?? 'user@lecturemate.com';
+    final isAutoSummary = appSettings?.isAutoSummaryEnabled ?? true;
+    final isNotification = appSettings?.isNotificationEnabled ?? true;
+    final isDarkMode = appSettings?.isDarkMode ?? false;
+    final selectedLanguage = appSettings?.language == 'en' ? 'English' : '한국어';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('설정', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -69,14 +54,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               leading: CircleAvatar(
                 backgroundColor: Colors.indigo,
                 child: Text(
-                  _userName.isNotEmpty ? _userName[0] : 'U',
+                  userName.isNotEmpty ? userName[0] : 'U',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               ),
-              title: Text(_userName, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(_userEmail),
+              title: Text(userName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(userEmail),
               trailing: const Icon(Icons.edit_outlined, size: 20),
-              onTap: _showEditProfileDialog,
+              onTap: () => _showEditProfileDialog(context, userName),
             ),
           ),
           const SizedBox(height: 12),
@@ -87,22 +72,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
             secondary: const Icon(Icons.auto_awesome, color: Colors.indigo),
             title: const Text('녹음 완료 후 자동 AI 요약'),
             subtitle: const Text('강의 녹음이 끝나면 자동으로 요약 노트를 생성합니다.'),
-            value: _isAutoSummaryEnabled,
+            value: isAutoSummary,
             activeColor: Colors.indigo,
             onChanged: (val) {
-              setState(() => _isAutoSummaryEnabled = val);
-              _saveBoolSetting('isAutoSummaryEnabled', val);
+              if (appSettings != null) {
+                context.read<SettingsProvider>().updateSettings(
+                      appSettings.copyWith(isAutoSummaryEnabled: val),
+                    );
+              }
             },
           ),
           SwitchListTile(
             secondary: const Icon(Icons.notifications_active_outlined, color: Colors.indigo),
             title: const Text('요약 완료 알림'),
             subtitle: const Text('AI 노드가 생성되면 푸시 알림을 받습니다.'),
-            value: _isNotificationEnabled,
+            value: isNotification,
             activeColor: Colors.indigo,
             onChanged: (val) {
-              setState(() => _isNotificationEnabled = val);
-              _saveBoolSetting('isNotificationEnabled', val);
+              if (appSettings != null) {
+                context.read<SettingsProvider>().updateSettings(
+                      appSettings.copyWith(isNotificationEnabled: val),
+                    );
+              }
             },
           ),
           const Divider(),
@@ -113,18 +104,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             secondary: const Icon(Icons.dark_mode_outlined, color: Colors.indigo),
             title: const Text('다크 모드'),
             subtitle: const Text('어두운 테마 모드를 적용합니다.'),
-            value: _isDarkMode,
+            value: isDarkMode,
             activeColor: Colors.indigo,
             onChanged: (val) {
-              setState(() => _isDarkMode = val);
-              _saveBoolSetting('isDarkMode', val);
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('다크모드 설정이 변경되었습니다.'),
-                  duration: Duration(seconds: 1),
-                ),
-              );
+              if (appSettings != null) {
+                context.read<SettingsProvider>().updateSettings(
+                      appSettings.copyWith(isDarkMode: val),
+                    );
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('다크모드 설정이 변경되었습니다.'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              }
             },
           ),
           ListTile(
@@ -133,17 +126,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(_selectedLanguage, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                Text(selectedLanguage, style: const TextStyle(color: Colors.grey, fontSize: 14)),
                 const Icon(Icons.chevron_right, color: Colors.grey),
               ],
             ),
-            onTap: _showLanguageDialog,
+            onTap: () => _showLanguageDialog(context, appSettings),
           ),
           ListTile(
             leading: const Icon(Icons.cleaning_services_outlined, color: Colors.indigo),
             title: const Text('캐시 데이터 삭제'),
             subtitle: const Text('음성 임시 파일 및 캐시 데이터를 정리합니다.'),
-            onTap: _showClearCacheDialog,
+            onTap: () => _showClearCacheDialog(context),
           ),
           const Divider(),
 
@@ -153,7 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: const Icon(Icons.lock_outline, color: Colors.indigo),
             title: const Text('비밀번호 변경'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: _showChangePasswordDialog,
+            onTap: () => _showChangePasswordDialog(context),
           ),
           const ListTile(
             leading: Icon(Icons.info_outline, color: Colors.indigo),
@@ -178,7 +171,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               '로그아웃',
               style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
             ),
-            onTap: _showLogoutDialog,
+            onTap: () => _showLogoutDialog(context),
           ),
           const SizedBox(height: 24),
         ],
@@ -202,12 +195,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // 1) 프로필 수정 다이얼로그
-  void _showEditProfileDialog() {
-    final nameController = TextEditingController(text: _userName);
+  void _showEditProfileDialog(BuildContext context, String currentName) {
+    final nameController = TextEditingController(text: currentName);
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('프로필 수정'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -223,19 +216,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final newName = nameController.text.trim();
               if (newName.isNotEmpty) {
-                setState(() => _userName = newName);
-                _saveStringSetting('userName', newName);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('프로필 정보가 수정되었습니다.')),
-                );
+                Navigator.pop(dialogContext);
+                final success = await context.read<SettingsProvider>().updateProfile(newName);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(success ? '프로필 정보가 수정되었습니다.' : '프로필 수정 실패'),
+                    ),
+                  );
+                }
               }
             },
             child: const Text('저장'),
@@ -246,13 +242,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // 2) 비밀번호 변경 다이얼로그
-  void _showChangePasswordDialog() {
+  void _showChangePasswordDialog(BuildContext context) {
     final currentPwController = TextEditingController();
     final newPwController = TextEditingController();
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('비밀번호 변경'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -278,16 +274,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               if (currentPwController.text.isNotEmpty && newPwController.text.isNotEmpty) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('비밀번호가 성공적으로 변경되었습니다.')),
-                );
+                Navigator.pop(dialogContext);
+                final success = await context.read<SettingsProvider>().changePassword(
+                      currentPwController.text,
+                      newPwController.text,
+                    );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(success ? '비밀번호가 성공적으로 변경되었습니다.' : '비밀번호 변경에 실패했습니다.'),
+                    ),
+                  );
+                }
               }
             },
             child: const Text('변경'),
@@ -298,10 +302,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // 3) 언어 선택 다이얼로그
-  void _showLanguageDialog() {
+  void _showLanguageDialog(BuildContext context, AppSettings? appSettings) {
+    if (appSettings == null) return;
+    final currentLang = appSettings.language == 'en' ? 'English' : '한국어';
+
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('언어 선택'),
           content: Column(
@@ -310,24 +317,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
               RadioListTile<String>(
                 title: const Text('한국어'),
                 value: '한국어',
-                groupValue: _selectedLanguage,
+                groupValue: currentLang,
                 onChanged: (val) {
                   if (val != null) {
-                    setState(() => _selectedLanguage = val);
-                    _saveStringSetting('selectedLanguage', val);
-                    Navigator.pop(context);
+                    context.read<SettingsProvider>().updateSettings(
+                          appSettings.copyWith(language: 'ko'),
+                        );
+                    Navigator.pop(dialogContext);
                   }
                 },
               ),
               RadioListTile<String>(
                 title: const Text('English'),
                 value: 'English',
-                groupValue: _selectedLanguage,
+                groupValue: currentLang,
                 onChanged: (val) {
                   if (val != null) {
-                    setState(() => _selectedLanguage = val);
-                    _saveStringSetting('selectedLanguage', val);
-                    Navigator.pop(context);
+                    context.read<SettingsProvider>().updateSettings(
+                          appSettings.copyWith(language: 'en'),
+                        );
+                    Navigator.pop(dialogContext);
                   }
                 },
               ),
@@ -339,20 +348,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // 4) 캐시 삭제 다이얼로그
-  void _showClearCacheDialog() {
+  void _showClearCacheDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('캐시 삭제'),
         content: const Text('저장된 임시 파일과 캐시 데이터를 삭제하시겠습니까?\n강의 요약 노트는 삭제되지 않습니다.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('캐시 데이터가 성공적으로 정리되었습니다.')),
               );
@@ -365,22 +374,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // 5) 로그아웃 다이얼로그
-  void _showLogoutDialog() {
+  void _showLogoutDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('로그아웃'),
         content: const Text('정말 로그아웃 하시겠습니까?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('취소'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
             onPressed: () {
-              Navigator.pop(context);
-              // TODO: 실제 로그아웃 로직 처리
+              Navigator.pop(dialogContext);
+              // TODO: 실제 로그인 페이지 이동 또는 인증 토큰 삭제 처리
             },
             child: const Text('로그아웃'),
           ),
