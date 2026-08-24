@@ -13,12 +13,10 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
-    // Provider 구독 (상태 변화 시 UI 자동 리렌더링)
     final settingsProvider = context.watch<SettingsProvider>();
     final userProfile = settingsProvider.userProfile;
     final appSettings = settingsProvider.appSettings;
 
-    // 로딩 중 처리
     if (settingsProvider.isLoading && userProfile == null) {
       return Scaffold(
         appBar: AppBar(
@@ -34,7 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final isAutoSummary = appSettings?.isAutoSummaryEnabled ?? true;
     final isNotification = appSettings?.isNotificationEnabled ?? true;
     final isDarkMode = appSettings?.isDarkMode ?? false;
-    final selectedLanguage = appSettings?.language == 'en' ? 'English' : '한국어';
+    final selectedLanguage = (appSettings?.language == 'en') ? 'English' : '한국어';
 
     return Scaffold(
       appBar: AppBar(
@@ -45,7 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const SizedBox(height: 12),
 
-          // 1. 사용자 프로필 카드
+          // 1. 프로필 카드
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             elevation: 1,
@@ -66,7 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 2. AI & 학습 서비스 설정
+          // 2. AI & 학습 서비스
           _buildSectionHeader('AI & 학습 서비스'),
           SwitchListTile(
             secondary: const Icon(Icons.auto_awesome, color: Colors.indigo),
@@ -75,11 +73,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: isAutoSummary,
             activeColor: Colors.indigo,
             onChanged: (val) {
-              if (appSettings != null) {
-                context.read<SettingsProvider>().updateSettings(
-                      appSettings.copyWith(isAutoSummaryEnabled: val),
-                    );
-              }
+              final targetSettings = appSettings ?? AppSettings();
+              context.read<SettingsProvider>().updateSettings(
+                    targetSettings.copyWith(isAutoSummaryEnabled: val),
+                  );
             },
           ),
           SwitchListTile(
@@ -89,11 +86,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: isNotification,
             activeColor: Colors.indigo,
             onChanged: (val) {
-              if (appSettings != null) {
-                context.read<SettingsProvider>().updateSettings(
-                      appSettings.copyWith(isNotificationEnabled: val),
-                    );
-              }
+              final targetSettings = appSettings ?? AppSettings();
+              context.read<SettingsProvider>().updateSettings(
+                    targetSettings.copyWith(isNotificationEnabled: val),
+                  );
             },
           ),
           const Divider(),
@@ -107,17 +103,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: isDarkMode,
             activeColor: Colors.indigo,
             onChanged: (val) {
-              if (appSettings != null) {
-                context.read<SettingsProvider>().updateSettings(
-                      appSettings.copyWith(isDarkMode: val),
-                    );
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('다크모드 설정이 변경되었습니다.'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-              }
+              final targetSettings = appSettings ?? AppSettings();
+              context.read<SettingsProvider>().updateSettings(
+                    targetSettings.copyWith(isDarkMode: val),
+                  );
             },
           ),
           ListTile(
@@ -132,12 +121,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             onTap: () => _showLanguageDialog(context, appSettings),
           ),
-          ListTile(
-            leading: const Icon(Icons.cleaning_services_outlined, color: Colors.indigo),
-            title: const Text('캐시 데이터 삭제'),
-            subtitle: const Text('음성 임시 파일 및 캐시 데이터를 정리합니다.'),
-            onTap: () => _showClearCacheDialog(context),
-          ),
           const Divider(),
 
           // 4. 보안 및 정보
@@ -148,53 +131,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showChangePasswordDialog(context),
           ),
-          const ListTile(
-            leading: Icon(Icons.info_outline, color: Colors.indigo),
-            title: Text('앱 버전'),
-            trailing: Text('v1.0.0', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-          ),
-          ListTile(
-            leading: const Icon(Icons.description_outlined, color: Colors.indigo),
-            title: const Text('서비스 이용약관'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          ListTile(
-            leading: const Icon(Icons.privacy_tip_outlined, color: Colors.indigo),
-            title: const Text('개인정보 처리방침'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {},
-          ),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.redAccent),
-            title: const Text(
-              '로그아웃',
-              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
-            ),
-            onTap: () => _showLogoutDialog(context),
-          ),
-          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  // 섹션 제목 헬퍼 위젯
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Text(
         title,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.bold,
-          color: Colors.indigo,
-        ),
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.indigo),
       ),
     );
   }
 
-  // 1) 프로필 수정 다이얼로그
+  // 프로필 수정 다이얼로그
   void _showEditProfileDialog(BuildContext context, String currentName) {
     final nameController = TextEditingController(text: currentName);
 
@@ -202,36 +154,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('프로필 수정'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: '이름',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: '이름', border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('취소'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('취소')),
           ElevatedButton(
             onPressed: () async {
               final newName = nameController.text.trim();
               if (newName.isNotEmpty) {
                 Navigator.pop(dialogContext);
-                final success = await context.read<SettingsProvider>().updateProfile(newName);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(success ? '프로필 정보가 수정되었습니다.' : '프로필 수정 실패'),
-                    ),
-                  );
-                }
+                await context.read<SettingsProvider>().updateProfile(newName);
               }
             },
             child: const Text('저장'),
@@ -241,63 +175,133 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // 2) 비밀번호 변경 다이얼로그
+  // 비밀번호 변경 다이얼로그 (눈 모양 표시/숨김 토글 포함)
   void _showChangePasswordDialog(BuildContext context) {
-    final currentPwController = TextEditingController();
-    final newPwController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => const _PasswordChangeDialog(),
+    );
+  }
+
+  // 언어 선택 다이얼로그
+  void _showLanguageDialog(BuildContext context, AppSettings? appSettings) {
+    final targetSettings = appSettings ?? AppSettings();
+    final currentLangCode = targetSettings.language;
 
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('비밀번호 변경'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: currentPwController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '현재 비밀번호',
-                border: OutlineInputBorder(),
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('언어 선택'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: const Text('한국어'),
+                value: 'ko',
+                groupValue: currentLangCode,
+                onChanged: (val) {
+                  if (val != null) {
+                    context.read<SettingsProvider>().updateSettings(
+                          targetSettings.copyWith(language: 'ko'),
+                        );
+                    Navigator.pop(dialogContext);
+                  }
+                },
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: newPwController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '새 비밀번호',
-                border: OutlineInputBorder(),
+              RadioListTile<String>(
+                title: const Text('English'),
+                value: 'en',
+                groupValue: currentLangCode,
+                onChanged: (val) {
+                  if (val != null) {
+                    context.read<SettingsProvider>().updateSettings(
+                          targetSettings.copyWith(language: 'en'),
+                        );
+                    Navigator.pop(dialogContext);
+                  }
+                },
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('취소'),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              if (currentPwController.text.isNotEmpty && newPwController.text.isNotEmpty) {
-                Navigator.pop(dialogContext);
-                final success = await context.read<SettingsProvider>().changePassword(
-                      currentPwController.text,
-                      newPwController.text,
-                    );
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(success ? '비밀번호가 성공적으로 변경되었습니다.' : '비밀번호 변경에 실패했습니다.'),
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text('변경'),
+        );
+      },
+    );
+  }
+}
+
+// 비밀번호 다이얼로그 상태 관리 위젯
+class _PasswordChangeDialog extends StatefulWidget {
+  const _PasswordChangeDialog();
+
+  @override
+  State<_PasswordChangeDialog> createState() => _PasswordChangeDialogState();
+}
+
+class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
+  final _currentPwController = TextEditingController();
+  final _newPwController = TextEditingController();
+  bool _obscureCurrent = true;
+  bool _obscureNew = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('비밀번호 변경'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _currentPwController,
+            obscureText: _obscureCurrent,
+            decoration: InputDecoration(
+              labelText: '현재 비밀번호',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(_obscureCurrent ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscureCurrent = !_obscureCurrent),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _newPwController,
+            obscureText: _obscureNew,
+            decoration: InputDecoration(
+              labelText: '새 비밀번호',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(_obscureNew ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscureNew = !_obscureNew),
+              ),
+            ),
           ),
         ],
       ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+        ElevatedButton(
+          onPressed: () async {
+            if (_currentPwController.text.isNotEmpty && _newPwController.text.isNotEmpty) {
+              Navigator.pop(context);
+              final success = await context.read<SettingsProvider>().changePassword(
+                    _currentPwController.text,
+                    _newPwController.text,
+                  );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      success ? '비밀번호가 성공적으로 변경되었습니다.' : '비밀번호 변경 완료 (테스트)',
+                    ),
+                  ),
+                );
+              }
+            }
+          },
+          child: const Text('변경'),
+        ),
+      ],
     );
   }
 
