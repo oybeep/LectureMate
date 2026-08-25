@@ -10,20 +10,30 @@ class CourseScheduleItem {
   TimeOfDay startTime;
   TimeOfDay endTime;
   String room;
+  TextEditingController roomController; // 컨트롤러를 모델 내부에서 보존
 
   CourseScheduleItem({
     required this.day,
     required this.startTime,
     required this.endTime,
     this.room = '',
-  });
+  }) : roomController = TextEditingController(text: room) {
+    roomController.addListener(() {
+      room = roomController.text;
+    });
+  }
+
+  void dispose() {
+    roomController.dispose();
+  }
 
   String toSlotString() {
     final startStr =
         '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}';
     final endStr =
         '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
-    final roomStr = room.trim().isNotEmpty ? ' ($room)' : '';
+    final currentRoom = roomController.text.trim();
+    final roomStr = currentRoom.isNotEmpty ? ' ($currentRoom)' : '';
     return '$day $startStr~$endStr$roomStr';
   }
 
@@ -71,23 +81,7 @@ class TimetableScreen extends StatefulWidget {
 
 class _TimetableScreenState extends State<TimetableScreen> {
   final List<String> _days = ['월', '화', '수', '목', '금'];
-  final List<int> _hours = [
-    9,
-    10,
-    11,
-    12,
-    13,
-    14,
-    15,
-    16,
-    17,
-    18,
-    19,
-    20,
-    21,
-    22,
-    23
-  ];
+  final List<int> _hours = List.generate(15, (index) => index + 9); // 9시~23시
 
   final List<Color> _cardColors = [
     Colors.indigo.shade100,
@@ -123,9 +117,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
   int _timeOfDayToMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
 
-  // ---------------------------------------------------------------------------
-  // 🕒 시간 검증 로직 (역전 방지 + 중복 방지)
-  // ---------------------------------------------------------------------------
   String? _validateSchedules(
     List<CourseScheduleItem> schedules,
     List<dynamic> allSubjects, {
@@ -192,9 +183,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // 🗓️ 동적 시간표 리스트 다이얼로그 위젯
-  // ---------------------------------------------------------------------------
   Widget _buildScheduleEditor(
     List<CourseScheduleItem> schedules,
     StateSetter setDialogState,
@@ -302,13 +290,18 @@ class _TimetableScreenState extends State<TimetableScreen> {
                           padding: EdgeInsets.zero,
                           icon: const Icon(Icons.remove_circle,
                               color: Colors.redAccent, size: 18),
-                          onPressed: () =>
-                              setDialogState(() => schedules.removeAt(idx)),
+                          onPressed: () {
+                            setDialogState(() {
+                              final removed = schedules.removeAt(idx);
+                              removed.dispose();
+                            });
+                          },
                         ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   TextField(
+                    controller: item.roomController,
                     decoration: const InputDecoration(
                       hintText: '강의실 (예: E동 513호)',
                       isDense: true,
@@ -316,10 +309,6 @@ class _TimetableScreenState extends State<TimetableScreen> {
                           EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       border: OutlineInputBorder(),
                     ),
-                    controller: TextEditingController(text: item.room)
-                      ..selection =
-                          TextSelection.collapsed(offset: item.room.length),
-                    onChanged: (val) => item.room = val,
                   ),
                 ],
               ),
@@ -431,13 +420,25 @@ class _TimetableScreenState extends State<TimetableScreen> {
                             .read<SubjectProvider>()
                             .deleteSubject(subId);
                       }
+                      for (var item in schedules) {
+                        item.dispose();
+                      }
+                      titleController.dispose();
+                      instructorController.dispose();
                       if (mounted) Navigator.pop(context);
                     },
                     child:
                         const Text('삭제', style: TextStyle(color: Colors.red)),
                   ),
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () {
+                    for (var item in schedules) {
+                      item.dispose();
+                    }
+                    titleController.dispose();
+                    instructorController.dispose();
+                    Navigator.pop(context);
+                  },
                   child: const Text('취소', style: TextStyle(color: Colors.grey)),
                 ),
                 ElevatedButton(
@@ -501,6 +502,11 @@ class _TimetableScreenState extends State<TimetableScreen> {
                       await provider.addSubject(title, instructor, timeSlot);
                     }
 
+                    for (var item in schedules) {
+                      item.dispose();
+                    }
+                    titleController.dispose();
+                    instructorController.dispose();
                     if (mounted) Navigator.pop(context);
                   },
                   child: Text(existingItem == null ? '추가' : '수정'),
@@ -685,6 +691,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                 }
 
                                 final String room = item['room'] ?? '';
+                                final String instructor =
+                                    item['instructor'] ?? '';
 
                                 return Positioned(
                                   top: topPosition + 1,
@@ -692,29 +700,29 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                   right: 1,
                                   height: tileHeight - 2,
                                   child: GestureDetector(
-                                    onTap: () => _showAddOrEditClassDialog(
-                                      defaultDay: day,
-                                      existingItem: item['raw_item'],
-                                    ),
+                                    onTap: () {
+                                      _showAddOrEditClassDialog(
+                                        defaultDay: day,
+                                        existingItem: item['raw_item'],
+                                      );
+                                    },
                                     child: Container(
                                       padding: const EdgeInsets.all(4.0),
                                       decoration: BoxDecoration(
                                         color: tileColor,
-                                        borderRadius:
-                                            BorderRadius.circular(6),
-                                        boxShadow: const [
+                                        borderRadius: BorderRadius.circular(6),
+                                        boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black12,
+                                            color: Colors.black.withOpacity(0.05),
                                             blurRadius: 2,
-                                            offset: Offset(0, 1),
+                                            offset: const Offset(0, 1),
                                           )
                                         ],
                                       ),
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Text(
                                             title,
@@ -726,31 +734,27 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          if (tileHeight > 40) ...[
-                                            const SizedBox(height: 2),
+                                          if (room.isNotEmpty)
                                             Text(
-                                              item['instructor'] ?? '',
-                                              style: const TextStyle(
+                                              room,
+                                              style: TextStyle(
                                                 fontSize: 10,
-                                                color: Colors.black54,
+                                                color: Colors.grey.shade800,
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                             ),
-                                            if (room.isNotEmpty) ...[
-                                              const SizedBox(height: 1),
-                                              Text(
-                                                room,
-                                                style: const TextStyle(
-                                                  fontSize: 9,
-                                                  color: Colors.indigo,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
+                                          if (instructor.isNotEmpty &&
+                                              instructor != '미지정')
+                                            Text(
+                                              instructor,
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                color: Colors.grey.shade700,
                                               ),
-                                            ],
-                                          ],
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                         ],
                                       ),
                                     ),
