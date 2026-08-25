@@ -47,10 +47,9 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'LectureMate MVP',
       debugShowCheckedModeBanner: false,
-      // 💡 isDarkMode 값에 따라 ThemeMode 전환
       themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
-      
-      // 라이트 테마
+
+      // ☀️ 라이트 테마
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.indigo,
@@ -61,13 +60,20 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
 
-      // 다크 테마
+      // 🌙 다크 테마 (보완된 세련된 딥그레이 톤)
       darkTheme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF121212), // 눈이 편안한 딥 차콜
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.indigo,
           brightness: Brightness.dark,
+          surface: const Color(0xFF1E1E1E), // 카드 및 대화상자 배경색
         ),
-        useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1F1F1F),
+          elevation: 0,
+        ),
       ),
 
       home: const MainScreen(),

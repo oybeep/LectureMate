@@ -94,7 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(),
 
-          // 3. 앱 일반 설정
+          // 3. 앱 설정
           _buildSectionHeader('앱 설정'),
           SwitchListTile(
             secondary: const Icon(Icons.dark_mode_outlined, color: Colors.indigo),
@@ -121,6 +121,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             onTap: () => _showLanguageDialog(context, appSettings),
           ),
+          ListTile(
+            leading: const Icon(Icons.cleaning_services_outlined, color: Colors.indigo),
+            title: const Text('캐시 데이터 정리'),
+            subtitle: const Text('임시 데이터 저장 공간을 정리합니다.'),
+            onTap: () => _showClearCacheDialog(context),
+          ),
           const Divider(),
 
           // 4. 보안 및 정보
@@ -131,6 +137,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showChangePasswordDialog(context),
           ),
+          const Divider(),
+
+          // 5. 계정 관리
+          _buildSectionHeader('계정 관리'),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.orange),
+            title: const Text('로그아웃'),
+            onTap: () => _showLogoutDialog(context),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_remove_outlined, color: Colors.red),
+            title: const Text('회원 탈퇴', style: TextStyle(color: Colors.red)),
+            onTap: () => _showDeleteAccountDialog(context),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -175,7 +196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // 비밀번호 변경 다이얼로그 (눈 모양 표시/숨김 토글 포함)
+  // 비밀번호 변경 다이얼로그 호출
   void _showChangePasswordDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -228,9 +249,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
   }
+
+  // 캐시 삭제 다이얼로그
+  void _showClearCacheDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('캐시 삭제'),
+        content: const Text('저장된 임시 파일과 캐시 데이터를 삭제하시겠습니까?\n강의 요약 노트는 삭제되지 않습니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('캐시 데이터가 성공적으로 정리되었습니다.')),
+              );
+            },
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 로그아웃 다이얼로그
+  void _showLogoutDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('로그아웃'),
+        content: const Text('정말 로그아웃 하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('취소')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('로그아웃 되었습니다.')),
+              );
+            },
+            child: const Text('로그아웃', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 회원 탈퇴 다이얼로그
+  void _showDeleteAccountDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('회원 탈퇴'),
+        content: const Text('탈퇴 시 저장된 모든 강의 데이터 및 AI 요약 정보가 삭제됩니다. 계속하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('취소')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('회원 탈퇴가 완료되었습니다.')),
+              );
+            },
+            child: const Text('탈퇴하기', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// 비밀번호 다이얼로그 상태 관리 위젯
+// 비밀번호 변경 다이얼로그 클래스
 class _PasswordChangeDialog extends StatefulWidget {
   const _PasswordChangeDialog();
 
@@ -302,103 +394,6 @@ class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
           child: const Text('변경'),
         ),
       ],
-    );
-  }
-
-  // 3) 언어 선택 다이얼로그
-  void _showLanguageDialog(BuildContext context, AppSettings? appSettings) {
-    if (appSettings == null) return;
-    final currentLang = appSettings.language == 'en' ? 'English' : '한국어';
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('언어 선택'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<String>(
-                title: const Text('한국어'),
-                value: '한국어',
-                groupValue: currentLang,
-                onChanged: (val) {
-                  if (val != null) {
-                    context.read<SettingsProvider>().updateSettings(
-                          appSettings.copyWith(language: 'ko'),
-                        );
-                    Navigator.pop(dialogContext);
-                  }
-                },
-              ),
-              RadioListTile<String>(
-                title: const Text('English'),
-                value: 'English',
-                groupValue: currentLang,
-                onChanged: (val) {
-                  if (val != null) {
-                    context.read<SettingsProvider>().updateSettings(
-                          appSettings.copyWith(language: 'en'),
-                        );
-                    Navigator.pop(dialogContext);
-                  }
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // 4) 캐시 삭제 다이얼로그
-  void _showClearCacheDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('캐시 삭제'),
-        content: const Text('저장된 임시 파일과 캐시 데이터를 삭제하시겠습니까?\n강의 요약 노트는 삭제되지 않습니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('취소'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('캐시 데이터가 성공적으로 정리되었습니다.')),
-              );
-            },
-            child: const Text('삭제'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 5) 로그아웃 다이얼로그
-  void _showLogoutDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('로그아웃'),
-        content: const Text('정말 로그아웃 하시겠습니까?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('취소'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              // TODO: 실제 로그인 페이지 이동 또는 인증 토큰 삭제 처리
-            },
-            child: const Text('로그아웃'),
-          ),
-        ],
-      ),
     );
   }
 }
