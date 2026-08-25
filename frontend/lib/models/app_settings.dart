@@ -4,11 +4,12 @@ class AppSettings {
   final bool isDarkMode;
   final String language;
 
+  // 💡 required를 빼고 기본값을 부여합니다.
   AppSettings({
-    required this.isAutoSummaryEnabled,
-    required this.isNotificationEnabled,
-    required this.isDarkMode,
-    required this.language,
+    this.isAutoSummaryEnabled = true,
+    this.isNotificationEnabled = true,
+    this.isDarkMode = false,
+    this.language = 'ko',
   });
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
