@@ -75,7 +75,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         _notes = notesData;
       });
 
-      // 요약 진행 중인 노특가 있을 때만 4초 마다 폴링
+      // 요약 진행 중인 노트가 있을 때만 4초마다 폴링
       bool hasProcessingNote = _notes.any((note) {
         final summary = note['summary']?.toString().trim() ?? '';
         return summary.isEmpty;
@@ -102,7 +102,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   }
 
   void _checkAndStartPolling(int subjectId) {
-    // 이전 타이머가 작동 중이라면 취소하여 타이머 중첩 및 과목 꼬임 방지
     _pollingTimer?.cancel();
 
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
@@ -117,8 +116,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   Future<void> _deleteLectureNote(int lectureId) async {
     try {
       await _apiService.deleteLecture(lectureId);
-    
-      // 비동기 요청 후 위젯이 해제되었으면 이후 작업 중단
+
       if (!mounted) return;
 
       if (_selectedSubjectId != null) {
@@ -140,20 +138,21 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   Future<void> _renameLectureNote(int lectureId, String newTitle) async {
     try {
       await _apiService.updateLectureTitle(lectureId, newTitle);
+      if (!mounted) return;
+
       if (_selectedSubjectId != null) {
         _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('제목이 수정되었습니다.')),
-        );
-      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('제목이 수정되었습니다.')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('수정 중 오류가 발생했습니다: $e')),
-        );
-      }
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('수정 중 오류가 발생했습니다: $e')),
+      );
     }
   }
 
@@ -255,7 +254,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (stfContext, setDialogState) {
             final quiz = quizzes[currentQuizIndex];
             final List<dynamic> options = quiz['options'] ?? quiz['choices'] ?? [];
             final int correctAnswer = int.tryParse(quiz['answer']?.toString() ?? '0') ?? 0;
@@ -459,7 +458,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                     },
                     child: _notes.isEmpty
                         ? ListView(
-                            physics: const AlwaysScrollableScrollPhysics(), // 💡 빈 화면에서도 새로고침 스크롤 가능하도록 추가
+                            physics: const AlwaysScrollableScrollPhysics(),
                             children: const [
                               SizedBox(height: 150),
                               Center(
@@ -516,15 +515,16 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                 ),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(16),
-                                  // 💡 카드 전체 클릭 시 상세 페이지 연결 (필요한 DetailScreen 클래스명 지정)
                                   onTap: () {
-        
+                                    // 💡 별도의 LectureNoteDetailScreen 위젯 클래스가 구현되어 있는지 확인이 필요합니다.
+                                    /*
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) => LectureNoteDetailScreen(noteData: note),
                                       ),
                                     );
+                                    */
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(16.0),
@@ -1033,23 +1033,24 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     return detailedData.toString();
   }
 
-  // 💡 공통 로딩 화면 렌더링 (캡처 사진과 동일한 스펙)
+// 💡 공통 로딩 화면 (다크모드 대응)
   Widget _buildProcessingLoadingView(String message) {
+    final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const CircularProgressIndicator(
+          CircularProgressIndicator(
             strokeWidth: 3,
-            color: Colors.indigo,
+            color: theme.colorScheme.primary,
           ),
           const SizedBox(height: 20),
           Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: Colors.black87,
+              color: theme.colorScheme.onSurface,
             ),
           ),
         ],
@@ -1058,11 +1059,13 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
   }
 
   Widget _buildSttView(String sttRawText) {
+    final theme = Theme.of(context);
+
     if (_sttViewMode == 1) {
       return SingleChildScrollView(
         child: SelectableText(
           sttRawText,
-          style: const TextStyle(fontSize: 15, height: 1.7, color: Colors.black87),
+          style: TextStyle(fontSize: 15, height: 1.7, color: theme.colorScheme.onSurface),
         ),
       );
     }
@@ -1076,7 +1079,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('아직 생성된 가독성 정제본이 없습니다.'),
+            Text('아직 생성된 가독성 정제본이 없습니다.', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 8),
             ElevatedButton.icon(
               onPressed: _fetchCleanedSTT,
@@ -1091,15 +1094,17 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     return SingleChildScrollView(
       child: MarkdownBody(
         data: _cleanedTranscript!,
-        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-          p: const TextStyle(fontSize: 15, height: 1.6, color: Colors.black87),
-          h2: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo),
+        styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+          p: TextStyle(fontSize: 15, height: 1.6, color: theme.colorScheme.onSurface),
+          h2: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
         ),
       ),
     );
   }
 
   Widget _buildCustomNoteView() {
+    final theme = Theme.of(context);
+
     if (_isLoadingFormat) {
       return _buildProcessingLoadingView('AI가 맞춤 노트를 생성하고 있습니다...');
     }
@@ -1109,16 +1114,16 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.auto_awesome, size: 56, color: Colors.indigo),
+            Icon(Icons.auto_awesome, size: 56, color: theme.colorScheme.primary),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               '원하는 학습 노트 형식을 선택하세요.',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               '코넬, 시험 대비, 아웃라인, 플래시카드, Feynman 테크닉을 지원합니다.',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
@@ -1126,8 +1131,8 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
               icon: const Icon(Icons.format_shapes),
               label: const Text('양식 선택 및 생성하기'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.indigo,
-                foregroundColor: Colors.white,
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: theme.colorScheme.onPrimary,
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
@@ -1139,19 +1144,19 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     return SingleChildScrollView(
       child: Card(
         elevation: 0,
-        color: Colors.white,
+        color: theme.colorScheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.indigo.shade100),
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: MarkdownBody(
             data: _generatedCustomContent!,
-            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-              p: const TextStyle(fontSize: 15, height: 1.6),
-              h1: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.indigo),
-              h2: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigoAccent),
+            styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+              p: TextStyle(fontSize: 15, height: 1.6, color: theme.colorScheme.onSurface),
+              h1: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+              h2: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: theme.colorScheme.secondary),
             ),
           ),
         ),
@@ -1161,6 +1166,8 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     final title = _lectureData?['title'] ??
         _lectureData?['lecture_title'] ??
         _lectureData?['filename'] ??
@@ -1181,7 +1188,7 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: theme.colorScheme.inversePrimary,
         actions: [
           if (_currentTabIndex == 2 && !_isProcessing)
             IconButton(
@@ -1194,7 +1201,6 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: _isProcessing
-            // 💡 서버에서 처리 완료될 때까지 첨부 이미지와 동등한 로딩 화면 유지
             ? _buildProcessingLoadingView('AI가 강의 노트를 생성하고 있습니다...')
             : IndexedStack(
                 index: _currentTabIndex,
@@ -1229,10 +1235,10 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                       Expanded(
                         child: Card(
                           elevation: 0,
-                          color: Colors.grey.shade50,
+                          color: theme.colorScheme.surfaceContainerHighest,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(color: Colors.grey.shade300),
+                            side: BorderSide(color: theme.colorScheme.outlineVariant),
                           ),
                           child: Padding(
                             padding: const EdgeInsets.all(16.0),
@@ -1247,19 +1253,22 @@ class _LectureNoteDetailScreenState extends State<LectureNoteDetailScreen> {
                   SingleChildScrollView(
                     child: Card(
                       elevation: 0,
-                      color: Colors.white,
+                      color: theme.colorScheme.surface,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.grey.shade200),
+                        side: BorderSide(color: theme.colorScheme.outlineVariant),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: MarkdownBody(
                           data: formattedDetailedSummary,
-                          styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                            p: const TextStyle(fontSize: 15, height: 1.6),
-                            h3: const TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+                          styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                            p: TextStyle(fontSize: 15, height: 1.6, color: theme.colorScheme.onSurface),
+                            h3: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.primary,
+                            ),
                           ),
                         ),
                       ),
