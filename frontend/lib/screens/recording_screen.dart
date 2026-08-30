@@ -123,6 +123,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     // 💡 SubjectProvider에서 최신 과목 데이터 구독
     final provider = context.watch<SubjectProvider>();
     final List<String> subjects = [
@@ -134,12 +137,14 @@ class _RecordingScreenState extends State<RecordingScreen> {
     ];
 
     // 현재 선택된 과목이 목록에 없으면 '전체 과목'으로 안전하게 복구
-    final currentSelected = subjects.contains(_selectedSubject) ? _selectedSubject : "전체 과목";
+    final currentSelected =
+        subjects.contains(_selectedSubject) ? _selectedSubject : "전체 과목";
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI 강의 질의응답', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: const Text('AI 강의 질의응답',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: colorScheme.inversePrimary,
         actions: [
           // 과목 선택 드롭다운 버튼
           Padding(
@@ -147,7 +152,8 @@ class _RecordingScreenState extends State<RecordingScreen> {
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: currentSelected,
-                icon: const Icon(Icons.filter_list),
+                icon: Icon(Icons.filter_list, color: colorScheme.onSurface),
+                dropdownColor: colorScheme.surface,
                 onChanged: (String? newValue) {
                   if (newValue != null) {
                     setState(() {
@@ -160,7 +166,11 @@ class _RecordingScreenState extends State<RecordingScreen> {
                     value: value,
                     child: Text(
                       value,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onSurface,
+                      ),
                     ),
                   );
                 }).toList(),
@@ -171,22 +181,30 @@ class _RecordingScreenState extends State<RecordingScreen> {
       ),
       body: Column(
         children: [
-          // 현재 선택된 검색 대상 과목 태그
+          // 현재 선택된 검색 대상 과목 태그 (테마 자동 대응)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.indigo.shade50,
+            color: colorScheme.surfaceContainer,
             child: Row(
               children: [
-                const Icon(Icons.psychology, size: 20, color: Colors.indigo),
+                Icon(Icons.psychology, size: 20, color: colorScheme.primary),
                 const SizedBox(width: 8),
                 Text(
                   '검색 대상: ',
-                  style: TextStyle(fontSize: 13, color: Colors.indigo.shade900, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 Text(
                   currentSelected,
-                  style: const TextStyle(fontSize: 13, color: Colors.indigo, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -201,20 +219,28 @@ class _RecordingScreenState extends State<RecordingScreen> {
               itemBuilder: (context, index) {
                 final msg = _messages[index];
                 return Align(
-                  alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: msg.isUser
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
                   child: Container(
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                    ),
                     margin: const EdgeInsets.symmetric(vertical: 6),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: msg.isUser ? Colors.indigo : Colors.grey.shade100,
+                      color: msg.isUser
+                          ? colorScheme.primary
+                          : colorScheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(16),
                         topRight: const Radius.circular(16),
                         bottomLeft: Radius.circular(msg.isUser ? 16 : 2),
                         bottomRight: Radius.circular(msg.isUser ? 2 : 16),
                       ),
-                      border: msg.isUser ? null : Border.all(color: Colors.grey.shade300),
+                      border: msg.isUser
+                          ? null
+                          : Border.all(color: colorScheme.outlineVariant),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -223,31 +249,37 @@ class _RecordingScreenState extends State<RecordingScreen> {
                           msg.text,
                           style: TextStyle(
                             fontSize: 15,
-                            color: msg.isUser ? Colors.white : Colors.black87,
+                            color: msg.isUser
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface,
                             height: 1.4,
                           ),
                         ),
-                        
+
                         // 백엔드에서 타임스탬프를 반환해준 경우 표시
-                        if (msg.timestamp != null && msg.timestamp != "00:00") ...[
+                        if (msg.timestamp != null &&
+                            msg.timestamp != "00:00") ...[
                           const SizedBox(height: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: Colors.indigo.shade100,
+                              color: colorScheme.primaryContainer,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.access_time, size: 14, color: Colors.indigo),
+                                Icon(Icons.access_time,
+                                    size: 14,
+                                    color: colorScheme.onPrimaryContainer),
                                 const SizedBox(width: 4),
                                 Text(
                                   '강의 구간: ${msg.timestamp}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.indigo,
+                                    color: colorScheme.onPrimaryContainer,
                                   ),
                                 ),
                               ],
@@ -263,20 +295,23 @@ class _RecordingScreenState extends State<RecordingScreen> {
           ),
 
           if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: SizedBox(
                 width: 24,
                 height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: colorScheme.primary,
+                ),
               ),
             ),
 
-          // 질문 입력 바
+          // 질문 입력 바 (다크모드 고정 하얀색 문제 해결)
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: colorScheme.surface,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.05),
@@ -291,12 +326,19 @@ class _RecordingScreenState extends State<RecordingScreen> {
                   Expanded(
                     child: TextField(
                       controller: _textController,
+                      style: TextStyle(color: colorScheme.onSurface),
                       decoration: InputDecoration(
                         hintText: '강의 내용에 대해 질문해보세요...',
-                        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                        hintStyle: TextStyle(
+                          color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                          fontSize: 14,
+                        ),
                         filled: true,
-                        fillColor: Colors.grey.shade100,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        fillColor: colorScheme.surfaceContainer,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(24),
                           borderSide: BorderSide.none,
@@ -310,8 +352,8 @@ class _RecordingScreenState extends State<RecordingScreen> {
                     onPressed: _sendMessage,
                     icon: const Icon(Icons.send_rounded),
                     style: IconButton.styleFrom(
-                      backgroundColor: Colors.indigo,
-                      foregroundColor: Colors.white,
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
                     ),
                   ),
                 ],

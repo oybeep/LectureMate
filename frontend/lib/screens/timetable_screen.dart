@@ -10,7 +10,7 @@ class CourseScheduleItem {
   TimeOfDay startTime;
   TimeOfDay endTime;
   String room;
-  TextEditingController roomController; // 컨트롤러를 모델 내부에서 보존
+  TextEditingController roomController;
 
   CourseScheduleItem({
     required this.day,
@@ -83,16 +83,17 @@ class _TimetableScreenState extends State<TimetableScreen> {
   final List<String> _days = ['월', '화', '수', '목', '금'];
   final List<int> _hours = List.generate(15, (index) => index + 9); // 9시~23시
 
+  // 다크 모드 / 라이트 모드 공용 파스텔 컬러 팔레트
   final List<Color> _cardColors = [
-    Colors.indigo.shade100,
-    Colors.teal.shade100,
-    Colors.orange.shade100,
-    Colors.purple.shade100,
-    Colors.blue.shade100,
-    Colors.pink.shade100,
-    Colors.amber.shade100,
-    Colors.lightGreen.shade100,
-    Colors.cyan.shade100,
+    Colors.indigo.shade200,
+    Colors.teal.shade200,
+    Colors.orange.shade200,
+    Colors.purple.shade200,
+    Colors.blue.shade200,
+    Colors.pink.shade200,
+    Colors.amber.shade200,
+    Colors.lightGreen.shade200,
+    Colors.cyan.shade200,
   ];
 
   @override
@@ -186,6 +187,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
   Widget _buildScheduleEditor(
     List<CourseScheduleItem> schedules,
     StateSetter setDialogState,
+    ThemeData theme,
   ) {
     String formatTime(TimeOfDay t) {
       final hour = t.hour.toString().padLeft(2, '0');
@@ -215,8 +217,11 @@ class _TimetableScreenState extends State<TimetableScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('수업 일정 목록',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            Text('수업 일정 목록',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: theme.colorScheme.onSurface)),
             TextButton.icon(
               onPressed: () {
                 setDialogState(() {
@@ -239,10 +244,10 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
-            color: Colors.grey.shade50,
+            color: theme.colorScheme.surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
-              side: BorderSide(color: Colors.grey.shade300),
+              side: BorderSide(color: theme.dividerColor),
             ),
             child: Padding(
               padding: const EdgeInsets.all(8.0),
@@ -253,6 +258,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                       DropdownButton<String>(
                         value: item.day,
                         underline: const SizedBox(),
+                        dropdownColor: theme.cardColor,
                         items: ['월', '화', '수', '목', '금', '토'].map((d) {
                           return DropdownMenuItem(
                               value: d,
@@ -353,6 +359,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
     showDialog(
       context: context,
       builder: (context) {
+        final theme = Theme.of(context);
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
@@ -395,7 +402,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      _buildScheduleEditor(schedules, setDialogState),
+                      _buildScheduleEditor(schedules, setDialogState, theme),
                     ],
                   ),
                 ),
@@ -521,6 +528,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final provider = context.watch<SubjectProvider>();
     final subjects = provider.subjects;
 
@@ -569,7 +577,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
       appBar: AppBar(
         title:
             const Text('주간 시간표', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: theme.colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -586,29 +594,32 @@ class _TimetableScreenState extends State<TimetableScreen> {
       body: Column(
         children: [
           Container(
-            color: Colors.grey.shade100,
+            color: theme.colorScheme.surfaceVariant,
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: Row(
               children: [
-                const SizedBox(
+                SizedBox(
                     width: 45,
                     child: Center(
                         child: Text('시간',
-                            style:
-                                TextStyle(fontSize: 12, color: Colors.grey)))),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurfaceVariant)))),
                 ..._days.map((day) => Expanded(
                       child: Center(
                         child: Text(
                           day,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 14),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: theme.colorScheme.onSurface),
                         ),
                       ),
                     )),
               ],
             ),
           ),
-          const Divider(height: 1, thickness: 1),
+          Divider(height: 1, thickness: 1, color: theme.dividerColor),
           Expanded(
             child: SingleChildScrollView(
               child: SizedBox(
@@ -622,7 +633,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                           decoration: BoxDecoration(
                             border: Border(
                               bottom: BorderSide(
-                                  color: Colors.grey.shade300, width: 0.5),
+                                  color: theme.dividerColor.withOpacity(0.5),
+                                  width: 0.5),
                             ),
                           ),
                           child: Row(
@@ -632,8 +644,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                 child: Center(
                                   child: Text(
                                     '$hour시',
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.grey),
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: theme.colorScheme.onSurfaceVariant),
                                   ),
                                 ),
                               ),
@@ -642,7 +655,8 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                       decoration: BoxDecoration(
                                         border: Border(
                                           left: BorderSide(
-                                              color: Colors.grey.shade200,
+                                              color: theme.dividerColor
+                                                  .withOpacity(0.3),
                                               width: 0.5),
                                         ),
                                       ),
@@ -677,7 +691,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                   (s) => (s['title'] ?? s['name']) == title,
                                 );
 
-                                Color tileColor = Colors.indigo.shade100;
+                                Color tileColor = Colors.indigo.shade200;
                                 if (subjectIndex != -1) {
                                   tileColor = _cardColors[
                                       subjectIndex % _cardColors.length];
@@ -713,7 +727,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                         borderRadius: BorderRadius.circular(6),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black.withOpacity(0.05),
+                                            color: Colors.black.withOpacity(0.08),
                                             blurRadius: 2,
                                             offset: const Offset(0, 1),
                                           )
@@ -737,9 +751,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                           if (room.isNotEmpty)
                                             Text(
                                               room,
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontSize: 10,
-                                                color: Colors.grey.shade800,
+                                                color: Colors.black54,
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
@@ -748,9 +762,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                               instructor != '미지정')
                                             Text(
                                               instructor,
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontSize: 9,
-                                                color: Colors.grey.shade700,
+                                                color: Colors.black45,
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
