@@ -289,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _showFeedbackSnackBar('제목 수정 실패 (${response.statusCode})',
               isError: true);
         }
-      } catch (e) {
+      } catch (e) { // 👈 이제 try-catch 짝이 정확히 맞아떨어집니다!
         _showFeedbackSnackBar('제목 수정 실패: $e', isError: true);
       }
     }
@@ -1367,7 +1367,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
   // 🎨 메인 화면 UI 빌드 (다크모드 완벽 대응)
   // ---------------------------------------------------------------------------
   @override
@@ -1826,8 +1826,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     },
                   ),
-          ],
+          ], 
         ),
       ),
     );
   }
+}
