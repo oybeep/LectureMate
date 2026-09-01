@@ -36,16 +36,21 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
+    _stopPolling();
     super.dispose();
+  }
+
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
   }
 
   void _syncAndFetchNotes() {
     if (!mounted) return;
     final subjects = context.read<SubjectProvider>().subjects;
     if (subjects.isNotEmpty) {
-      if (_selectedSubjectId == null ||
-          !subjects.any((s) => int.tryParse(s['id'].toString()) == _selectedSubjectId)) {
+      final exists = subjects.any((s) => int.tryParse(s['id'].toString()) == _selectedSubjectId);
+      if (_selectedSubjectId == null || !exists) {
         _selectedSubjectId = int.tryParse(subjects.first['id'].toString());
       }
       if (_selectedSubjectId != null) {
@@ -60,7 +65,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   }
 
   Future<void> _fetchNotesForSubject(int subjectId, {bool showLoading = true}) async {
-    if (showLoading) {
+    if (showLoading && mounted) {
       setState(() {
         _isLoadingNotes = true;
         _errorMessage = null;
@@ -75,16 +80,15 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         _notes = notesData;
       });
 
-      // 요약 진행 중인 노트가 있을 때만 4초마다 폴링
       bool hasProcessingNote = _notes.any((note) {
         final summary = note['summary']?.toString().trim() ?? '';
         return summary.isEmpty;
       });
 
       if (hasProcessingNote) {
-        _checkAndStartPolling(subjectId);
+        _startPollingIfNeeded(subjectId);
       } else {
-        _pollingTimer?.cancel();
+        _stopPolling();
       }
     } catch (e) {
       if (!mounted) return;
@@ -92,6 +96,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         _notes = [];
         _errorMessage = '노트를 불러오는 중 오류가 발생했습니다: $e';
       });
+      _stopPolling();
     } finally {
       if (mounted && showLoading) {
         setState(() {
@@ -101,14 +106,14 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     }
   }
 
-  void _checkAndStartPolling(int subjectId) {
-    _pollingTimer?.cancel();
+  void _startPollingIfNeeded(int subjectId) {
+    if (_pollingTimer != null && _pollingTimer!.isActive) return;
 
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (timer) async {
       if (mounted && _selectedSubjectId == subjectId) {
         await _fetchNotesForSubject(subjectId, showLoading: false);
       } else {
-        timer.cancel();
+        _stopPolling();
       }
     });
   }
@@ -116,7 +121,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
   Future<void> _deleteLectureNote(int lectureId) async {
     try {
       await _apiService.deleteLecture(lectureId);
-
       if (!mounted) return;
 
       if (_selectedSubjectId != null) {
@@ -128,7 +132,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('삭제 중 오류가 발생했습니다: $e')),
       );
@@ -149,7 +152,6 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('수정 중 오류가 발생했습니다: $e')),
       );

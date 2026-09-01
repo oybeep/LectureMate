@@ -1368,23 +1368,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // 🎨 메인 화면 UI 빌드
+  // 🎨 메인 화면 UI 빌드 (다크모드 완벽 대응)
   // ---------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     final subjects = context.watch<SubjectProvider>().subjects;
+    
+    // 테마 및 색상 변수 정의
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.school, color: Colors.indigo),
-            SizedBox(width: 8),
-            Text('LectureMate MVP',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            Icon(Icons.school, color: colorScheme.primary),
+            const SizedBox(width: 8),
+            const Text(
+              'LectureMate MVP',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1398,13 +1405,14 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 1. 백엔드 서버 상태 카드
             Card(
               elevation: 0,
               color: serverStatus.contains('실패') ||
                       serverStatus.contains('오류') ||
                       serverStatus.contains('없습니다')
-                  ? Colors.red.shade50
-                  : Colors.green.shade50,
+                  ? (isDark ? Colors.red.shade900.withOpacity(0.4) : Colors.red.shade50)
+                  : (isDark ? Colors.green.shade900.withOpacity(0.4) : Colors.green.shade50),
               child: ListTile(
                 leading: Icon(
                   serverStatus.contains('실패') ||
@@ -1418,14 +1426,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       ? Colors.red
                       : Colors.green,
                 ),
-                title: const Text('백엔드 서버 상태',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(serverStatus),
+                title: Text(
+                  '백엔드 서버 상태',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                subtitle: Text(
+                  serverStatus,
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
               ),
             ),
             const SizedBox(height: 16),
+
+            // 2. 실시간 음성 분석 / 파일 업로드 섹션 카드
             Card(
-              color: Colors.indigo.shade50,
+              color: isDark ? colorScheme.surfaceContainerHigh : Colors.indigo.shade50,
               elevation: 1,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -1435,19 +1453,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
+                        Row(
                           children: [
-                            Icon(Icons.mic, color: Colors.indigo),
-                            SizedBox(width: 8),
-                            Text('강의 음성 분석',
-                                style: TextStyle(
-                                    fontSize: 17, fontWeight: FontWeight.bold)),
+                            Icon(Icons.mic, color: colorScheme.primary),
+                            const SizedBox(width: 8),
+                            Text(
+                              '강의 음성 분석',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
                           ],
                         ),
                         if (isRecording)
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: isPaused ? Colors.orange : Colors.red,
                               borderRadius: BorderRadius.circular(12),
@@ -1455,20 +1477,17 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Row(
                               children: [
                                 Icon(
-                                  isPaused
-                                      ? Icons.pause_circle_filled
-                                      : Icons.fiber_manual_record,
+                                  isPaused ? Icons.pause_circle_filled : Icons.fiber_manual_record,
                                   color: Colors.white,
                                   size: 12,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  isPaused
-                                      ? '일시정지'
-                                      : _formatDuration(_recordSeconds),
+                                  isPaused ? '일시정지' : _formatDuration(_recordSeconds),
                                   style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold),
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1476,28 +1495,34 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    
+                    // 수강 과목 선택 드롭다운
                     DropdownButtonFormField<int>(
                       value: selectedSubjectId,
-                      decoration: const InputDecoration(
+                      dropdownColor: theme.cardColor,
+                      style: TextStyle(color: colorScheme.onSurface),
+                      decoration: InputDecoration(
                         labelText: '수강 과목 선택',
-                        border: OutlineInputBorder(),
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        fillColor: Colors.white,
+                        labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        fillColor: isDark ? colorScheme.surface : Colors.white,
                         filled: true,
                       ),
-                      hint: const Text('분석할 과목을 선택하세요'),
-                      items:
-                          subjects.map<DropdownMenuItem<int>>((dynamic subject) {
+                      hint: Text(
+                        '분석할 과목을 선택하세요',
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                      items: subjects.map<DropdownMenuItem<int>>((dynamic subject) {
                         final int subId = int.parse(subject['id'].toString());
-                        final String title =
-                            subject['title'] ?? subject['name'] ?? '과목';
-                        final String prof = subject['instructor'] ??
-                            subject['professor'] ??
-                            '교수 미지정';
+                        final String title = subject['title'] ?? subject['name'] ?? '과목';
+                        final String prof = subject['instructor'] ?? subject['professor'] ?? '교수 미지정';
                         return DropdownMenuItem<int>(
                           value: subId,
-                          child: Text('$title ($prof)'),
+                          child: Text(
+                            '$title ($prof)',
+                            style: TextStyle(color: colorScheme.onSurface),
+                          ),
                         );
                       }).toList(),
                       onChanged: (isProcessing || isRecording)
@@ -1506,8 +1531,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               if (newValue != null) {
                                 setState(() {
                                   selectedSubjectId = newValue;
-                                  processStatus =
-                                      '선택한 과목 노트 목록을 동기화합니다.';
+                                  processStatus = '선택한 과목 노트 목록을 동기화합니다.';
                                 });
                                 _fetchNotesForSubject(newValue);
                               }
@@ -1517,11 +1541,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     Text(
                       processStatus,
                       style: TextStyle(
-                          color: isRecording
-                              ? (isPaused
-                                  ? Colors.orange.shade800
-                                  : Colors.red)
-                              : Colors.black87),
+                        color: isRecording
+                            ? (isPaused ? Colors.orange.shade800 : Colors.red)
+                            : colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (isProcessing) ...[
@@ -1535,43 +1558,41 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ] else ...[
-                      Row(
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: (isRecording || selectedSubjectId == null)
-                                ? null
-                                : _uploadAudioFile,
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('파일 업로드'),
-                          ),
-                          const SizedBox(width: 10),
-                          ElevatedButton.icon(
-                            onPressed: selectedSubjectId == null
-                                ? null
-                                : _toggleRecording,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  isRecording ? Colors.red : Colors.indigo,
-                              foregroundColor: Colors.white,
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: (isRecording || selectedSubjectId == null)
+                                  ? null
+                                  : _uploadAudioFile,
+                              icon: const Icon(Icons.upload_file),
+                              label: const Text('파일 업로드'),
                             ),
-                            icon: Icon(isRecording ? Icons.stop : Icons.mic),
-                            label: Text(
-                                isRecording ? '녹음 중지 및 분석' : '실시간 음성 녹음'),
-                          ),
-                          if (isRecording) ...[
                             const SizedBox(width: 10),
-                            OutlinedButton.icon(
-                              onPressed: _togglePauseRecording,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.orange.shade800,
-                                side: BorderSide(color: Colors.orange.shade800),
+                            ElevatedButton.icon(
+                              onPressed: selectedSubjectId == null ? null : _toggleRecording,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isRecording ? Colors.red : colorScheme.primary,
+                                foregroundColor: Colors.white,
                               ),
-                              icon: Icon(
-                                  isPaused ? Icons.play_arrow : Icons.pause),
-                              label: Text(isPaused ? '다시 시작' : '일시정지'),
+                              icon: Icon(isRecording ? Icons.stop : Icons.mic),
+                              label: Text(isRecording ? '녹음 중지 및 분석' : '실시간 음성 녹음'),
                             ),
+                            if (isRecording) ...[
+                              const SizedBox(width: 10),
+                              OutlinedButton.icon(
+                                onPressed: _togglePauseRecording,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.orange.shade800,
+                                  side: BorderSide(color: Colors.orange.shade800),
+                                ),
+                                icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+                                label: Text(isPaused ? '다시 시작' : '일시정지'),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ],
                   ],
@@ -1579,35 +1600,41 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 20),
+
+            // 3. 방금 생성된 AI 노트 바로보기 카드
             if (latestNoteData != null) ...[
               Card(
-                color: Colors.indigo.shade600,
+                color: isDark ? colorScheme.primaryContainer : Colors.indigo.shade600,
                 child: ListTile(
-                  leading: const Icon(Icons.auto_awesome,
-                      color: Colors.white, size: 30),
+                  leading: const Icon(Icons.auto_awesome, color: Colors.white, size: 30),
                   title: const Text(
                     '✨ 방금 생성된 AI 노트 바로보기',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                   subtitle: const Text(
                     '클릭하여 핵심 요약 및 STT 원문 확인',
                     style: TextStyle(color: Colors.white70),
                   ),
-                  trailing:
-                      const Icon(Icons.arrow_forward_ios, color: Colors.white),
+                  trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white),
                   onTap: () => _showNoteDetailModal(latestNoteData!),
                 ),
               ),
               const SizedBox(height: 20),
             ],
+
+            // 4. 선택 과목의 저장된 노트 목록
             if (selectedSubjectId != null) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('📚 과목 저장 노트',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text(
+                    '📚 과목 저장 노트',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 20),
                     onPressed: () => _fetchNotesForSubject(selectedSubjectId!),
@@ -1618,10 +1645,16 @@ class _HomeScreenState extends State<HomeScreen> {
               if (isLoadingNotes)
                 const Center(child: CircularProgressIndicator())
               else if (lectureNotes.isEmpty)
-                const Card(
+                Card(
+                  color: theme.cardColor,
                   child: Padding(
-                    padding: EdgeInsets.all(16.0),
-                    child: Center(child: Text('해당 과목에 저장된 요약 노트가 없습니다.')),
+                    padding: const EdgeInsets.all(16.0),
+                    child: Center(
+                      child: Text(
+                        '해당 과목에 저장된 요약 노트가 없습니다.',
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
                   ),
                 )
               else
@@ -1631,79 +1664,86 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: lectureNotes.length,
                   itemBuilder: (context, index) {
                     final note = Map<String, dynamic>.from(lectureNotes[index]);
-                    final int noteId = int.parse(
-                        (note['id'] ?? note['lecture_id']).toString());
-                    final String noteTitle = note['title'] ??
-                        note['filename'] ??
-                        '강의 노트 ${index + 1}';
+                    final int noteId = int.parse((note['id'] ?? note['lecture_id']).toString());
+                    final String noteTitle =
+                        note['title'] ?? note['filename'] ?? '강의 노트 ${index + 1}';
 
                     return Card(
+                      color: theme.cardColor,
                       child: ListTile(
-                        leading:
-                            const Icon(Icons.article, color: Colors.indigo),
-                        title: Text(noteTitle),
-                        subtitle: Text(note['created_at'] ?? '저장됨'),
+                        leading: Icon(Icons.article, color: colorScheme.primary),
+                        title: Text(
+                          noteTitle,
+                          style: TextStyle(color: colorScheme.onSurface),
+                        ),
+                        subtitle: Text(
+                          note['created_at'] ?? '저장됨',
+                          style: TextStyle(color: colorScheme.onSurfaceVariant),
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined,
-                                  color: Colors.indigo, size: 20),
+                              icon: Icon(Icons.edit_outlined, color: colorScheme.primary, size: 20),
                               tooltip: '노트 제목 수정',
-                              onPressed: () =>
-                                  _showEditTitleDialog(noteId, noteTitle),
+                              onPressed: () => _showEditTitleDialog(noteId, noteTitle),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline,
-                                  color: Colors.redAccent, size: 20),
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
                               tooltip: '노트 삭제',
-                              onPressed: () =>
-                                  _confirmDeleteNote(noteId, noteTitle),
+                              onPressed: () => _confirmDeleteNote(noteId, noteTitle),
                             ),
-                            const Icon(Icons.chevron_right),
+                            Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
                           ],
                         ),
                         onTap: () async {
-                          // 1. noteId 추출
-                          final int noteId = int.parse((note['id'] ?? note['lecture_id'] ?? note['note_id']).toString());
-  
-                          // 2. 단건 조회 API를 통해 요약문 및 STT 원문이 포함된 전체 데이터 가져오기
-                          final fullNote = await _fetchSingleNoteDetail(noteId);
-
-                          // 3. 전체 데이터가 있으면 fullNote 전달, 실패 시 기본 note 전달
+                          final int targetId = int.parse(
+                            (note['id'] ?? note['lecture_id'] ?? note['note_id']).toString(),
+                          );
+                          final fullNote = await _fetchSingleNoteDetail(targetId);
                           if (mounted) {
                             _showNoteDetailModal(fullNote ?? note);
-  }
-},
+                          }
+                        },
                       ),
                     );
                   },
                 ),
               const SizedBox(height: 20),
             ],
+
+            // 5. 내 수강 과목 목록
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('🗓️ 내 수강 과목 목록',
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                  '🗓️ 내 수강 과목 목록',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
                 ElevatedButton.icon(
                   onPressed: () => _showAddSubjectDialog(context),
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('과목 추가'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             subjects.isEmpty
-                ? const Center(
-                    child: Text('등록된 과목이 없습니다. 과목 추가 버튼을 눌러보세요!'))
+                ? Center(
+                    child: Text(
+                      '등록된 과목이 없습니다. 과목 추가 버튼을 눌러보세요!',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                  )
                 : ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -1711,63 +1751,65 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemBuilder: (context, index) {
                       final subject = subjects[index];
                       final int subId = int.parse(subject['id'].toString());
-                      final String title =
-                          subject['title'] ?? subject['name'] ?? '과목명';
-                      final String prof = subject['instructor'] ??
-                          subject['professor'] ??
-                          '교수 미지정';
-                      final String time = subject['time_slot'] ??
-                          subject['time'] ??
-                          '시간 미정';
+                      final String title = subject['title'] ?? subject['name'] ?? '과목명';
+                      final String prof = subject['instructor'] ?? subject['professor'] ?? '교수 미지정';
+                      final String time = subject['time_slot'] ?? subject['time'] ?? '시간 미정';
 
                       bool isSelected = selectedSubjectId == subId;
 
                       return Card(
-                        color: isSelected ? Colors.indigo.shade50 : null,
+                        color: isSelected
+                            ? (isDark
+                                ? colorScheme.primaryContainer.withOpacity(0.4)
+                                : Colors.indigo.shade50)
+                            : theme.cardColor,
                         shape: isSelected
                             ? RoundedRectangleBorder(
-                                side: const BorderSide(
-                                    color: Colors.indigo, width: 1.5),
+                                side: BorderSide(color: colorScheme.primary, width: 1.5),
                                 borderRadius: BorderRadius.circular(12),
                               )
                             : null,
                         child: ListTile(
-                          leading: Icon(Icons.book,
-                              color: isSelected ? Colors.indigo : Colors.grey),
+                          leading: Icon(
+                            Icons.book,
+                            color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                          ),
                           title: Text(
                             title,
                             style: TextStyle(
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              color: colorScheme.onSurface,
                             ),
                           ),
-                          subtitle: Text('$prof | ⏰ $time'),
+                          subtitle: Text(
+                            '$prof | ⏰ $time',
+                            style: TextStyle(color: colorScheme.onSurfaceVariant),
+                          ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (isSelected)
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 8.0),
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8.0),
                                   child: Chip(
-                                    label: Text('선택됨',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.indigo)),
-                                    backgroundColor: Colors.white,
-                                    side: BorderSide(color: Colors.indigo),
+                                    label: Text(
+                                      '선택됨',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: colorScheme.primary,
+                                      ),
+                                    ),
+                                    backgroundColor: theme.cardColor,
+                                    side: BorderSide(color: colorScheme.primary),
                                   ),
                                 ),
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined,
-                                    color: Colors.indigo, size: 20),
+                                icon: Icon(Icons.edit_outlined, color: colorScheme.primary, size: 20),
                                 tooltip: '과목 수정',
-                                onPressed: () =>
-                                    _showEditSubjectDialog(subject),
+                                onPressed: () => _showEditSubjectDialog(subject),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline,
-                                    color: Colors.redAccent, size: 20),
+                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
                                 tooltip: '과목 삭제',
                                 onPressed: () => _deleteSubject(subId, title),
                               ),
@@ -1789,4 +1831,3 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-}
