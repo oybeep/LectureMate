@@ -146,7 +146,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       if (_selectedSubjectId != null) {
         _fetchNotesForSubject(_selectedSubjectId!, showLoading: false);
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('제목이 수정되었습니다.')),
       );
@@ -200,11 +200,11 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.edit_note, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('노트 제목 수정'),
+              Icon(Icons.edit_note, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('노트 제목 수정'),
             ],
           ),
           content: TextField(
@@ -257,6 +257,9 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (stfContext, setDialogState) {
+            final theme = Theme.of(stfContext);
+            final isDarkMode = theme.brightness == Brightness.dark;
+
             final quiz = quizzes[currentQuizIndex];
             final List<dynamic> options = quiz['options'] ?? quiz['choices'] ?? [];
             final int correctAnswer = int.tryParse(quiz['answer']?.toString() ?? '0') ?? 0;
@@ -265,9 +268,12 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
             return AlertDialog(
               title: Row(
                 children: [
-                  const Icon(Icons.quiz, color: Colors.indigo),
+                  Icon(Icons.quiz, color: theme.colorScheme.primary),
                   const SizedBox(width: 8),
-                  Text('AI 복습 퀴즈 (${currentQuizIndex + 1}/${quizzes.length})'),
+                  Text(
+                    'AI 복습 퀴즈 (${currentQuizIndex + 1}/${quizzes.length})',
+                    style: TextStyle(fontSize: 18, color: theme.colorScheme.onSurface),
+                  ),
                 ],
               ),
               content: SingleChildScrollView(
@@ -277,29 +283,47 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                   children: [
                     Text(
                       'Q${currentQuizIndex + 1}. ${quiz['question'] ?? '문제 내용 없음'}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onSurface,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     ...List.generate(options.length, (idx) {
-                      Color? tileColor;
+                      Color tileColor = theme.colorScheme.surfaceContainerHighest;
+                      Color textColor = theme.colorScheme.onSurface;
+
                       if (isAnswerChecked) {
                         if (idx == correctAnswer) {
-                          tileColor = Colors.green.shade100;
+                          tileColor = isDarkMode ? Colors.green.shade900 : Colors.green.shade100;
+                          textColor = isDarkMode ? Colors.green.shade100 : Colors.green.shade900;
                         } else if (selectedOption == idx) {
-                          tileColor = Colors.red.shade100;
+                          tileColor = isDarkMode ? Colors.red.shade900 : Colors.red.shade100;
+                          textColor = isDarkMode ? Colors.red.shade100 : Colors.red.shade900;
                         }
                       }
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 8),
                         decoration: BoxDecoration(
-                          color: tileColor ?? Colors.grey.shade100,
+                          color: tileColor,
                           borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: selectedOption == idx && !isAnswerChecked
+                                ? theme.colorScheme.primary
+                                : Colors.transparent,
+                            width: 1.5,
+                          ),
                         ),
                         child: RadioListTile<int>(
                           value: idx,
                           groupValue: selectedOption,
-                          title: Text('${idx + 1}) ${options[idx]}'),
+                          activeColor: theme.colorScheme.primary,
+                          title: Text(
+                            '${idx + 1}) ${options[idx]}',
+                            style: TextStyle(color: textColor, fontSize: 14),
+                          ),
                           onChanged: isAnswerChecked
                               ? null
                               : (val) {
@@ -314,10 +338,13 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                       const SizedBox(height: 12),
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
+                          color: isDarkMode ? Colors.indigo.shade900 : Colors.blue.shade50,
                           borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isDarkMode ? Colors.indigo.shade700 : Colors.blue.shade200,
+                          ),
                         ),
                         child: Text(
                           selectedOption == correctAnswer
@@ -325,9 +352,10 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                               : '❌ 오답입니다. (정답: ${correctAnswer + 1}번)\n💡 해설: $explanation',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
+                            height: 1.4,
                             color: selectedOption == correctAnswer
-                                ? Colors.green.shade900
-                                : Colors.red.shade900,
+                                ? (isDarkMode ? Colors.green.shade300 : Colors.green.shade900)
+                                : (isDarkMode ? Colors.red.shade300 : Colors.red.shade900),
                           ),
                         ),
                       ),
@@ -373,6 +401,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final subjects = context.watch<SubjectProvider>().subjects;
 
     final bool isSelectedValid = subjects.any(
@@ -386,7 +415,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI 강의 요약 노트', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: theme.colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -404,19 +433,31 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(16.0),
-            color: Colors.indigo.shade50,
+            color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
             child: Row(
               children: [
-                const Icon(Icons.class_outlined, color: Colors.indigo),
+                Icon(Icons.class_outlined, color: theme.colorScheme.primary),
                 const SizedBox(width: 12),
-                const Text('과목 선택: ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  '과목 선택: ',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
                 Expanded(
                   child: subjects.isEmpty
-                      ? const Text('등록된 과목이 없습니다.')
+                      ? Text(
+                          '등록된 과목이 없습니다.',
+                          style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                        )
                       : DropdownButtonHideUnderline(
                           child: DropdownButton<int>(
                             value: currentSelectedValue,
                             isExpanded: true,
+                            dropdownColor: theme.colorScheme.surface,
+                            style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 15),
                             items: subjects.map<DropdownMenuItem<int>>((sub) {
                               final int subId = int.tryParse(sub['id'].toString()) ?? 0;
                               final String profName = sub['instructor'] ??
@@ -447,7 +488,7 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
           if (_errorMessage != null)
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+              child: Text(_errorMessage!, style: TextStyle(color: theme.colorScheme.error)),
             ),
           Expanded(
             child: _isLoadingNotes
@@ -461,16 +502,18 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                     child: _notes.isEmpty
                         ? ListView(
                             physics: const AlwaysScrollableScrollPhysics(),
-                            children: const [
-                              SizedBox(height: 150),
+                            children: [
+                              const SizedBox(height: 150),
                               Center(
                                 child: Column(
                                   children: [
-                                    Icon(Icons.note_alt_outlined, size: 64, color: Colors.grey),
-                                    SizedBox(height: 12),
+                                    Icon(Icons.note_alt_outlined,
+                                        size: 64, color: theme.colorScheme.outline),
+                                    const SizedBox(height: 12),
                                     Text(
                                       '해당 과목에 저장된 AI 요약 노트가 없습니다.',
-                                      style: TextStyle(color: Colors.grey, fontSize: 16),
+                                      style: TextStyle(
+                                          color: theme.colorScheme.outline, fontSize: 16),
                                     ),
                                   ],
                                 ),
@@ -490,9 +533,10 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                   '강의 노트 ${index + 1}';
 
                               final rawKeywords = note['keywords'] ?? note['key_concepts'];
-                              final List<dynamic> keywords = (rawKeywords is List && rawKeywords.isNotEmpty)
-                                  ? rawKeywords
-                                  : ['분석 중...'];
+                              final List<dynamic> keywords =
+                                  (rawKeywords is List && rawKeywords.isNotEmpty)
+                                      ? rawKeywords
+                                      : ['분석 중...'];
 
                               final List<dynamic> quizzes = (note['quizzes'] is List)
                                   ? note['quizzes']
@@ -511,22 +555,24 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
 
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 16),
-                                elevation: 3,
+                                elevation: 2,
+                                clipBehavior: Clip.antiAlias, // InkWell Ripple 범위를 모서리에 맞춤
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(
+                                    color: theme.colorScheme.outlineVariant.withOpacity(0.5),
+                                  ),
                                 ),
                                 child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
                                   onTap: () {
-                                    // 💡 별도의 LectureNoteDetailScreen 위젯 클래스가 구현되어 있는지 확인이 필요합니다.
-                                    /*
+                                    // 카드 전체 터치 시 상세 노트 스크린으로 이동
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (context) => LectureNoteDetailScreen(noteData: note),
+                                        builder: (context) =>
+                                            LectureNoteDetailScreen(noteData: note),
                                       ),
                                     );
-                                    */
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(16.0),
@@ -539,15 +585,18 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                             Expanded(
                                               child: Text(
                                                 titleText,
-                                                style: const TextStyle(
-                                                    fontSize: 18, fontWeight: FontWeight.bold),
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: theme.colorScheme.onSurface,
+                                                ),
                                               ),
                                             ),
                                             Row(
                                               children: [
                                                 IconButton(
-                                                  icon: const Icon(Icons.edit_outlined,
-                                                      color: Colors.indigo, size: 20),
+                                                  icon: Icon(Icons.edit_outlined,
+                                                      color: theme.colorScheme.primary, size: 20),
                                                   tooltip: '노트 제목 수정',
                                                   onPressed: () =>
                                                       _showEditTitleDialog(noteId, titleText),
@@ -562,8 +611,10 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                                 const SizedBox(width: 4),
                                                 Text(
                                                   displayDate,
-                                                  style: const TextStyle(
-                                                      color: Colors.grey, fontSize: 13),
+                                                  style: TextStyle(
+                                                    color: theme.colorScheme.outline,
+                                                    fontSize: 13,
+                                                  ),
                                                 ),
                                               ],
                                             ),
@@ -572,10 +623,12 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                         const Divider(height: 24),
                                         Row(
                                           children: [
-                                            const Text(
+                                            Text(
                                               '📝 핵심 요약',
                                               style: TextStyle(
-                                                  fontWeight: FontWeight.bold, color: Colors.indigo),
+                                                fontWeight: FontWeight.bold,
+                                                color: theme.colorScheme.primary,
+                                              ),
                                             ),
                                             if (isProcessing) ...[
                                               const SizedBox(width: 8),
@@ -584,22 +637,28 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                                 height: 12,
                                                 child: CircularProgressIndicator(strokeWidth: 2),
                                               ),
-                                            ]
+                                            ],
                                           ],
                                         ),
                                         const SizedBox(height: 6),
                                         Text(
                                           summaryText,
                                           style: TextStyle(
-                                              fontSize: 14,
-                                              height: 1.4,
-                                              color: isProcessing ? Colors.orange.shade800 : Colors.black87),
+                                            fontSize: 14,
+                                            height: 1.4,
+                                            // 👈 다크모드 대응: onSurface 적용
+                                            color: isProcessing
+                                                ? Colors.orangeAccent
+                                                : theme.colorScheme.onSurface,
+                                          ),
                                         ),
                                         const SizedBox(height: 12),
-                                        const Text(
+                                        Text(
                                           '🏷️ 주요 키워드',
                                           style: TextStyle(
-                                              fontWeight: FontWeight.bold, color: Colors.indigo),
+                                            fontWeight: FontWeight.bold,
+                                            color: theme.colorScheme.primary,
+                                          ),
                                         ),
                                         const SizedBox(height: 6),
                                         Wrap(
@@ -609,11 +668,17 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                             return Chip(
                                               label: Text(
                                                 kw.toString(),
-                                                style: const TextStyle(fontSize: 12),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: theme.colorScheme.onSecondaryContainer,
+                                                ),
                                               ),
-                                              backgroundColor: Colors.indigo.shade50,
-                                              labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                                              backgroundColor:
+                                                  theme.colorScheme.secondaryContainer,
+                                              labelPadding:
+                                                  const EdgeInsets.symmetric(horizontal: 6),
                                               visualDensity: VisualDensity.compact,
+                                              side: BorderSide.none,
                                             );
                                           }).toList(),
                                         ),
@@ -623,8 +688,8 @@ class _AiNotesScreenState extends State<AiNotesScreen> {
                                           child: ElevatedButton.icon(
                                             onPressed: () => _showQuizDialog(quizzes),
                                             style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.indigo,
-                                              foregroundColor: Colors.white,
+                                              backgroundColor: theme.colorScheme.primary,
+                                              foregroundColor: theme.colorScheme.onPrimary,
                                               shape: RoundedRectangleBorder(
                                                 borderRadius: BorderRadius.circular(10),
                                               ),
