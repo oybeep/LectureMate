@@ -989,378 +989,193 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // 📑 AI 상세 요약 모달 (📌 세부 강의 내용 포함)
+  // 📄 노트 상세 모달 바텀시트 (다크모드 완벽 대응)
   // ---------------------------------------------------------------------------
   void _showNoteDetailModal(Map<String, dynamic> note) {
-    // 1. 중첩된 detail 객체가 있을 경우를 대비한 데이터 참조
-    final Map<String, dynamic> data = (note['detail'] is Map<String, dynamic>)
-        ? note['detail']
-        : (note['data'] is Map<String, dynamic> ? note['data'] : note);
-
-    final String title = note['title'] ?? note['filename'] ?? '강의 요약 노트';
-
-    // 2. 핵심 요약 키값 유연화 (ai_summary, overview 등 추가)
-    final String summary = (data['summary'] ??
-            data['ai_summary'] ??
-            data['overview'] ??
-            note['summary'] ??
-            '요약 내용이 없습니다.')
-        .toString();
-
-    // 3. STT 원문 키값 유연화
-    final String transcript = (data['transcript'] ??
-            data['stt_transcript'] ??
-            note['transcript'] ??
-            note['stt_transcript'] ??
-            'STT 음성 변환 기록이 없습니다.')
-        .toString();
-
-    // 4. 키워드 추출 유연화 (List 혹은 Comma 구분 String 대응)
-    List<dynamic> keywords = [];
-    final rawKeywords = data['keywords'] ??
-        data['key_concepts'] ??
-        note['keywords'] ??
-        note['key_concepts'];
-    if (rawKeywords is List) {
-      keywords = rawKeywords;
-    } else if (rawKeywords is String && rawKeywords.isNotEmpty) {
-      keywords = rawKeywords.split(',').map((e) => e.trim()).toList();
-    }
-
-    // 5. 세부 요약 항목 추출 (sections, contents 등 키값 추가 탐색)
-    List<dynamic> detailedSummary = [];
-    final rawDetails = data['detailed_summary'] ??
-        data['detail_summary'] ??
-        data['details'] ??
-        data['bullet_points'] ??
-        data['sections'] ??
-        note['detailed_summary'] ??
-        note['detail_summary'] ??
-        note['details'] ??
-        note['bullet_points'];
-
-    if (rawDetails is List) {
-      detailedSummary = rawDetails;
-    }
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent, // 모달 자체의 모서리 라운딩을 위해 투명 처리
       builder: (context) {
-        return DefaultTabController(
-          length: 2,
-          child: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.85,
-            maxChildSize: 0.95,
-            minChildSize: 0.5,
-            builder: (context, scrollController) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20.0, vertical: 12.0),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    const TabBar(
-                      labelColor: Colors.indigo,
-                      indicatorColor: Colors.indigo,
-                      tabs: [
-                        Tab(icon: Icon(Icons.auto_awesome), text: "AI 요약"),
-                        Tab(icon: Icon(Icons.subtitles), text: "STT 원문"),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: TabBarView(
-                        children: [
-                          // 1️⃣ AI 요약 탭
-                          ListView(
-                            controller: scrollController,
-                            children: [
-                              const SizedBox(height: 8),
-                              const Text(
-                                '🔑 핵심 키워드',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.indigo),
-                              ),
-                              const SizedBox(height: 8),
-                              keywords.isEmpty
-                                  ? const Text('추출된 키워드가 없습니다.',
-                                      style: TextStyle(color: Colors.grey))
-                                  : Wrap(
-                                      spacing: 8.0,
-                                      children: keywords.map<Widget>((kw) {
-                                        return Chip(
-                                          label: Text('# $kw'),
-                                          backgroundColor:
-                                              Colors.indigo.shade50,
-                                          side: BorderSide.none,
-                                        );
-                                      }).toList(),
-                                    ),
-                              const Divider(height: 28),
-                              const Text(
-                                '📝 핵심 요약 노트',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.indigo),
-                              ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade50,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                      color: Colors.indigo.shade100),
-                                ),
-                                child: Text(
-                                  summary,
-                                  style: const TextStyle(
-                                      fontSize: 15, height: 1.6),
-                                ),
-                              ),
-                              const Divider(height: 28),
-                              const Text(
-                                '📌 세부 강의 내용',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.indigo),
-                              ),
-                              const SizedBox(height: 10),
-                              detailedSummary.isEmpty
-                                  ? Container(
-                                      padding: const EdgeInsets.all(14),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey.shade50,
-                                        borderRadius:
-                                            BorderRadius.circular(10),
-                                      ),
-                                      child: const Text(
-                                        '세부 강의 내용이 없습니다.',
-                                        style: TextStyle(color: Colors.grey),
-                                      ),
-                                    )
-                                  : Column(
-                                      children: detailedSummary
-                                          .asMap()
-                                          .entries
-                                          .map<Widget>((entry) {
-                                        final int index = entry.key + 1;
-                                        final item = entry.value;
+        final theme = Theme.of(context);
+        final colorScheme = theme.colorScheme;
+        final isDark = theme.brightness == Brightness.dark;
 
-                                        // 1️⃣ Map 형태 (title + points/subpoints 구조)
-                                        if (item is Map) {
-                                          final String subTitle =
-                                              item['title'] ??
-                                                  item['topic'] ??
-                                                  '주제 $index';
-                                          List<dynamic> points = [];
-                                          if (item['points'] is List) {
-                                            points = item['points'];
-                                          } else if (item['descriptions']
-                                              is List) {
-                                            points = item['descriptions'];
-                                          } else if (item['explanation'] !=
-                                              null) {
-                                            points = [
-                                              item['explanation'].toString()
-                                            ];
-                                          }
+        // 다크모드/라이트모드 맞춤 배경색 및 텍스트 색상 정의
+        final containerBg = isDark ? colorScheme.surfaceContainerHigh : Colors.grey.shade100;
+        final cardBg = isDark ? colorScheme.surfaceContainer : Colors.white;
+        final textPrimary = colorScheme.onSurface;
+        final textSecondary = colorScheme.onSurfaceVariant;
 
-                                          return Container(
-                                            margin: const EdgeInsets.only(
-                                                bottom: 12),
-                                            padding: const EdgeInsets.all(14),
-                                            decoration: BoxDecoration(
-                                              color: Colors.indigo.shade50
-                                                  .withOpacity(0.4),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              border: Border.all(
-                                                  color:
-                                                      Colors.indigo.shade100),
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    const Icon(
-                                                      Icons.check_circle_rounded,
-                                                      size: 20,
-                                                      color: Colors.indigo,
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Expanded(
-                                                      child: Text(
-                                                        '$index. $subTitle',
-                                                        style: const TextStyle(
-                                                          fontSize: 15,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          color: Colors.indigo,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                if (points.isNotEmpty) ...[
-                                                  const SizedBox(height: 8),
-                                                  Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                            left: 28.0),
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: points
-                                                          .map<Widget>((p) {
-                                                        return Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  bottom: 4.0),
-                                                          child: Row(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              const Text('• ',
-                                                                  style: TextStyle(
-                                                                      color: Colors
-                                                                          .black54,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .bold)),
-                                                              Expanded(
-                                                                child: Text(
-                                                                  p.toString(),
-                                                                  style: const TextStyle(
-                                                                      fontSize:
-                                                                          13.5,
-                                                                      height:
-                                                                          1.4,
-                                                                      color: Colors
-                                                                          .black87),
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        );
-                                                      }).toList(),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                          );
-                                        }
+        final String summaryText = note['summary'] ?? note['summary_text'] ?? '요약 내용이 없습니다.';
+        final String transcriptText = note['transcript'] ?? note['stt_text'] ?? '변환된 원문이 없습니다.';
+        final dynamic keywords = note['keywords'] ?? note['key_concepts'] ?? [];
 
-                                        // 2️⃣ 기존 단순 텍스트 형태 호환
-                                        return Container(
-                                          margin:
-                                              const EdgeInsets.only(bottom: 8),
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            color: Colors.indigo.shade50
-                                                .withOpacity(0.4),
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                            border: Border.all(
-                                                color: Colors.indigo.shade100),
-                                          ),
-                                          child: Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              const Icon(
-                                                Icons.check_circle_rounded,
-                                                size: 18,
-                                                color: Colors.indigo,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  '$index. ${item.toString()}',
-                                                  style: const TextStyle(
-                                                    fontSize: 14,
-                                                    height: 1.5,
-                                                    color: Colors.black87,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
-                              const SizedBox(height: 16),
-                            ],
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          maxChildSize: 0.9,
+          minChildSize: 0.4,
+          expand: false,
+          builder: (context, scrollController) => Container(
+            decoration: BoxDecoration(
+              color: isDark ? colorScheme.surface : Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              children: [
+                // 1. 드래그 핸들바
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // 2. 메인 컨텐츠 영역
+                Expanded(
+                  child: DefaultTabController(
+                    length: 2,
+                    child: Column(
+                      children: [
+                        // 제목
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                          child: Text(
+                            note['title'] ?? note['filename'] ?? '강의 노트 상세',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: textPrimary,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
+                        ),
+                        const SizedBox(height: 12),
 
-                          // 2️⃣ STT 원문 탭
-                          ListView(
-                            controller: scrollController,
+                        // 탭바 (AI 요약 / STT 원문)
+                        TabBar(
+                          labelColor: colorScheme.primary,
+                          unselectedLabelColor: textSecondary,
+                          indicatorColor: colorScheme.primary,
+                          tabs: const [
+                            Tab(icon: Icon(Icons.auto_awesome, size: 20), text: 'AI 요약'),
+                            Tab(icon: Icon(Icons.description, size: 20), text: 'STT 원문'),
+                          ],
+                        ),
+
+                        // 탭 뷰 본문
+                        Expanded(
+                          child: TabBarView(
                             children: [
-                              const SizedBox(height: 8),
-                              const Text(
-                                '🎙️ 음성 변환(STT) 전체 텍스트',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.indigo),
-                              ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
-                                  borderRadius: BorderRadius.circular(12),
+                              // 탭 1: AI 요약 보기
+                              SingleChildScrollView(
+                                controller: scrollController,
+                                padding: const EdgeInsets.all(20.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 키워드 칩 태그 영역
+                                    if (keywords is List && keywords.isNotEmpty) ...[
+                                      Text(
+                                        '🔑 핵심 키워드',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                          color: textPrimary,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: keywords.map<Widget>((kw) {
+                                          return Chip(
+                                            label: Text(
+                                              '#${kw.toString()}',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: colorScheme.primary,
+                                              ),
+                                            ),
+                                            backgroundColor: isDark
+                                                ? colorScheme.primaryContainer.withOpacity(0.3)
+                                                : Colors.indigo.shade50,
+                                            side: BorderSide.none,
+                                          );
+                                        }).toList(),
+                                      ),
+                                      const SizedBox(height: 20),
+                                    ],
+
+                                    // 핵심 요약 박스 (배경색 다크모드 적용!)
+                                    Text(
+                                      '📌 핵심 요약 노트',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: containerBg,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        summaryText,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          height: 1.6,
+                                          color: textPrimary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                child: SelectableText(
-                                  transcript,
-                                  style: const TextStyle(
+                              ),
+
+                              // 탭 2: STT 원문 보기
+                              SingleChildScrollView(
+                                padding: const EdgeInsets.all(20.0),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: containerBg,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: SelectableText(
+                                    transcriptText,
+                                    style: TextStyle(
                                       fontSize: 14,
                                       height: 1.6,
-                                      color: Colors.black87),
+                                      color: textPrimary,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
         );
       },
