@@ -20,10 +20,16 @@ class SettingsService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        return UserProfile.fromJson(data);
+        final profile = UserProfile.fromJson(data);
+        
+        // 서버 데이터 수신 성공 시 로컬 저장소 캐시 갱신
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_keyProfile, jsonEncode(profile.toJson()));
+        
+        return profile;
       }
     } catch (_) {
-      // 서버가 켜져있지 않거나 에러 발생 시 로컬 저장소에서 로드
+      // 서버 미연동 또는 실패 시 로컬 로드 진행
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -49,11 +55,11 @@ class SettingsService {
       profileImageUrl: currentProfile.profileImageUrl,
     );
 
-    // 로컬 저장소에 우선 저장 (영구 유지)
+    // 로컬 저장소 우선 저장
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyProfile, jsonEncode(updated.toJson()));
 
-    // 백엔드 서버에 전송 시도
+    // 백엔드 서버 전송
     try {
       final response = await http.patch(
         Uri.parse('$baseUrl/users/me'),
@@ -70,17 +76,23 @@ class SettingsService {
     return updated;
   }
 
-  // 3. 앱 설정 조회 (서버 호출 ➡️ 실패 시 SharedPreferences)
+  // 3. 앱 설정 조회 (백엔드 URL 경로 수정: /settings)
   Future<AppSettings> getAppSettings() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/users/settings'),
+        Uri.parse('$baseUrl/settings'), // 💡 /users/settings -> /settings 수정
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 2));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        return AppSettings.fromJson(data);
+        final settings = AppSettings.fromJson(data);
+
+        // 서버 데이터 수신 성공 시 로컬 저장소 캐시 갱신
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_keySettings, jsonEncode(settings.toJson()));
+
+        return settings;
       }
     } catch (_) {}
 
@@ -98,16 +110,16 @@ class SettingsService {
     );
   }
 
-  // 4. 앱 설정 변경 (로컬 저장 + 서버 전송)
+  // 4. 앱 설정 변경 (백엔드 URL 경로 수정: /settings)
   Future<AppSettings> updateAppSettings(AppSettings settings) async {
-    // 로컬 저장소에 우선 저장 (영구 유지)
+    // 로컬 저장소 우선 저장
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keySettings, jsonEncode(settings.toJson()));
 
-    // 백엔드 서버에 전송 시도
+    // 백엔드 서버 전송
     try {
       final response = await http.patch(
-        Uri.parse('$baseUrl/users/settings'),
+        Uri.parse('$baseUrl/settings'), // 💡 /users/settings -> /settings 수정
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(settings.toJson()),
       ).timeout(const Duration(seconds: 2));
@@ -135,7 +147,6 @@ class SettingsService {
 
       return response.statusCode == 200;
     } catch (_) {
-      // 서버 미연동 테스트용 성공 처리
       return true;
     }
   }
