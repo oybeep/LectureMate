@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 # DB 연동 모듈 임포트
 import models
+import schemas
 from database import SessionLocal, engine, get_db
 
 # RAG & AI 서비스 모듈 임포트
@@ -614,3 +615,94 @@ async def handle_audio_upload_universal(
     except Exception as e:
         print(f"❌ Upload handling error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- 사용자 프로필 & 앱 설정 API 엔드포인트 ---
+
+# 1. 프로필 조회
+@app.get("/users/me", response_model=schemas.UserProfileResponse)
+@app.get("/api/v1/users/me", response_model=schemas.UserProfileResponse)
+def get_user_profile(db: Session = Depends(get_db)):
+    # TODO: 인증 토큰 연동 시 현재 로그인된 유저 조회 처리
+    user = db.query(models.User).first()
+    if not user:
+        # DB에 유저가 없을 경우 기본 테스트 유저 생성 후 반환
+        user = models.User(name="홍길동", email="user@lecturemate.com")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+# 2. 프로필 정보 수정
+@app.patch("/users/me", response_model=schemas.UserProfileResponse)
+@app.patch("/api/v1/users/me", response_model=schemas.UserProfileResponse)
+def update_user_profile(payload: schemas.UserProfileUpdate, db: Session = Depends(get_db)):
+    user = db.query(models.User).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자 정보를 찾을 수 없습니다.")
+
+    if payload.name is not None and payload.name.strip():
+        user.name = payload.name.strip()
+    if payload.email is not None and payload.email.strip():
+        user.email = payload.email.strip()
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# 3. 앱 서비스 설정 조회
+@app.get("/settings", response_model=schemas.AppSettingsResponse)
+@app.get("/api/v1/settings", response_model=schemas.AppSettingsResponse)
+def get_app_settings(db: Session = Depends(get_db)):
+    user = db.query(models.User).first()
+    user_id = user.id if user else 1
+
+    settings = db.query(models.AppSettings).filter(models.AppSettings.user_id == user_id).first()
+    if not settings:
+        # 기본 설정 레코드 생성
+        settings = models.AppSettings(
+            user_id=user_id,
+            auto_summary_enabled=True,
+            push_notification_enabled=True,
+            dark_mode_enabled=False,
+            language="ko"
+        )
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+
+# 4. 앱 서비스 설정 부분 업데이트 (토글 등)
+@app.patch("/settings", response_model=schemas.AppSettingsResponse)
+@app.patch("/api/v1/settings", response_model=schemas.AppSettingsResponse)
+def update_app_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(get_db)):
+    user = db.query(models.User).first()
+    user_id = user.id if user else 1
+
+    settings = db.query(models.AppSettings).filter(models.AppSettings.user_id == user_id).first()
+    if not settings:
+        settings = models.AppSettings(user_id=user_id)
+        db.add(settings)
+
+    if payload.auto_summary_enabled is not None:
+        settings.auto_summary_enabled = payload.auto_summary_enabled
+    if payload.push_notification_enabled is not None:
+        settings.push_notification_enabled = payload.push_notification_enabled
+    if payload.dark_mode_enabled is not None:
+        settings.dark_mode_enabled = payload.dark_mode_enabled
+    if payload.language is not None:
+        settings.language = payload.language
+
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+# 5. 로그아웃 API
+@app.post("/auth/logout")
+@app.post("/api/v1/auth/logout")
+def logout():
+    # 서버 측 세션/토큰 무효화 로직 위치
+    return {"status": "success", "message": "성공적으로 로그아웃되었습니다."}

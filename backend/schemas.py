@@ -51,3 +51,40 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     timestamp: Optional[str] = None
+
+# 6. 사용자 프로필 및 계정 관리 스키마
+class UserProfileBase(BaseModel):
+    name: str
+    email: str
+
+class UserProfileResponse(UserProfileBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+
+# 7. 앱 설정 (AI & 학습 서비스 및 토글) 스키마
+class AppSettingsBase(BaseModel):
+    auto_summary_enabled: bool = True       # 녹음 완료 후 자동 AI 요약
+    push_notification_enabled: bool = True  # 요약 완료 알림
+    dark_mode_enabled: bool = False         # 다크 모드
+    language: str = "ko"                    # 언어 설정 (ko, en 등)
+
+class AppSettingsResponse(AppSettingsBase):
+    id: int
+    user_id: int
+
+    class Config:
+        from_attributes = True
+
+class AppSettingsUpdate(BaseModel):
+    auto_summary_enabled: Optional[bool] = None
+    push_notification_enabled: Optional[bool] = None
+    dark_mode_enabled: Optional[bool] = None
+    language: Optional[str] = None
+
